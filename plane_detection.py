@@ -2,6 +2,17 @@
 # @author Yasu
 
 from contextlib import nullcontext
+from curses import pair_content
+from collections import deque
+from email import message
+from hashlib import new
+import queue
+from re import U
+from ssl import VERIFY_X509_TRUSTED_FIRST
+from tkinter import E, INSERT
+from typing import final
+from xml.sax.handler import property_declaration_handler
+import graphlib
 import math
 from platform import node
 import time
@@ -259,8 +270,9 @@ def pointcloud(out, verts, texcoords, color, painter=True):
 
 out = np.empty((h, w, 3), dtype=np.uint8)
 
-
-#nodeクラスの作成
+'''
+# 5/23まで
+# nodeクラスの作成
 class node:
     def __init__(self, points):
         self.node = points
@@ -338,8 +350,166 @@ def remove_miss(node):
             if abs(center - left) >= sur_value:
                 dele_node(node)
                 return
+'''
+
+# 5/30まで
+# 処理の概形
+def fastplaneextraction(point_cloud):
+    # データ構造構築
+    graph = initgraph(point_cloud)
+    # 粗い平面検出
+    boudaries, pai = ahcluster(graph)
+    # 粗い平面検出を精緻化
+    cluster, pro_pai = refine(bousaries, pai)
+    return cluster, pro_pai
+
+# データ構造構築
+def initgraph(point_cloud):
+    graph = []
+    for i in range(len(point_cloud)):
+        for j in range(len(point_cloud[0])):
+            v = point_cloud[i][j]
+            # nodeの除去の判定
+            if rejectnode(v):
+                v = []
+            graph.append
+    # 連結関係
+    for v in graph:
+        if not rejectedge():
+
+        if not rejectedge():
+    return graph
+
+# ノードの除去
+def rejectnode(v):
+    # データが欠落していたら
+    if v == None:
+        return True
+    # 周囲4点との奥行きの差
+    elif v == True:
+        return True
+    elif mse(v) > 100:
+        return True
+    else:
+        return False
+
+# 連結関係の除去
+def rejectedge(v1, v2, v3):
+    # 欠落していなければ
+    if (v1 == []) and (v2 == []) and (v3 == []):
+        return True 
+    # 法線のなす角
+    elif :
+        return True
+    else:
+        return False
+
+# 平均二乗誤差の計算
+def mse(v):
+    if v == []:
+        return math.inf
+    else:
+        pca = PCA()
+        return mean_squared_error(v, pca.fit(v))
+
+
+# 粗い平面検出
+def ahcluster(graph):
+    # MSEの昇順のヒープを作る
+    queue = buildminmseheap()
+    boudaries = []
+    pai = []
+    # queueの中身がある限り
+    while queue != []:
+        v = popmin(queue)
+        # vがマージされているならば
+        if v not in graph:
+            continue
+        u_best = []
+        u_merge = []
+        # 
+        for :
+            # 連結関係のノードをマージする
+            u_test = 
+            # 一番MSEが小さいノードを選ぶ
+            if mse(u_test) < mse(u_merge):
+                u_best = u
+                u_merge = u_best
+        # マージ失敗
+        if mse(u_merge) >= 100:
+            # vの大きさが一定以上ならば
+            if abs(v) >= 100:
+                # 平面とみなす?s
+                boudaries = []
+                pai = plane(v)
+                # 差集合
+                v =
+                e = 
+        # マージ成功
+        else:
+            queue.insert(u_merge)
+            e = 
+            v =
+    return boudaries, pai
+
+# 平面近似PCA
+def plane(v):
+    pca = PCA()
+    return pca.fit(v)
+
+# ヒープの作成
+def buildminheap():
+    # 1つずつmseを計算し直して並べ替える?
+    queue = deque()
+    queue.append()
+    return queue
+
+# 先頭を取り出す
+def popmin(queue):
+    choice = queue.popleft()
+    return choice
+
+
+# 粗い平面検出の精緻化
+def refine(boundaries, pai):
+    # キュー
+    queue = []
+    #
+    refine = []
+    # 最終的な図
+    final_graph = []
+    for boundary in boundaries:
+        refine_k = []
+        refine = 
+        # フチを取り除く
+        for :
+            if not in :
+                # vを除く
+                boundary = 
+        for :
+            # enqueue
+        if boundary == []:
+            # なんかしてる
+    while queue != []:
+        # dequeue
+        for p in :
+            if p >= 9 * mse() :
+                continue
+            if :
+                if :
+                    # enqueue
+            else:
+                refine = 
+                # enqueue
+    for refine_k in refine:
+        boundary = 
+    new_boundaries, pro_pai = ahcluster(final_graph)
+    return new_boundaries, pro_pai
     
-    
+
+
+
+
 while True:
     # Grab camera data
     if not state.paused:

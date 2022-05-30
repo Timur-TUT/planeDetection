@@ -7,9 +7,9 @@ from collections import deque
 from email import message
 from hashlib import new
 import queue
-from re import U
+from re import L, U
 from ssl import VERIFY_X509_TRUSTED_FIRST
-from tkinter import E, INSERT
+from tkinter import E, INSERT, W
 from typing import final
 from xml.sax.handler import property_declaration_handler
 import graphlib
@@ -354,49 +354,58 @@ def remove_miss(node):
 
 # 5/30まで
 # 処理の概形
+# 入力は2次元になった
 def fastplaneextraction(point_cloud):
-    # データ構造構築
-    graph = initgraph(point_cloud)
-    # 粗い平面検出
-    boudaries, pai = ahcluster(graph)
-    # 粗い平面検出を精緻化
+    # データ構造構築(ステップ1)
+    nodes, edges = initgraph(point_cloud)
+    # 粗い平面検出(ステップ2)
+    boudaries, pai = ahcluster(nodes, edges)
+    # 粗い平面検出を精緻化(ステップ3)
     cluster, pro_pai = refine(bousaries, pai)
     return cluster, pro_pai
 
-# データ構造構築
-def initgraph(point_cloud):
-    graph = []
-    for i in range(len(point_cloud)):
-        for j in range(len(point_cloud[0])):
-            v = point_cloud[i][j]
-            # nodeの除去の判定
-            if rejectnode(v):
-                v = []
-            graph.append
-    # 連結関係
-    for v in graph:
-        if not rejectedge():
+class Node:
+    def __init__(self, node, index):
+        self.node = node    #np.array型の点群の集合(10×10)
+        self.i, self.j = index  #２次元上のインデックス
 
-        if not rejectedge():
-    return graph
+# データ構造構築
+def initgraph(point_cloud, h=10, w=10):
+    nodes = []
+    edges = []
+    for i in range(len(point_cloud)/h):
+        for j in range(len(point_cloud[0])/W):
+            # node は論文の v
+            node = Node(point_cloud[i*h:i*h+h-1,j*w:j*w+w-1], (i,j))
+            # nodeの除去の判定
+            if rejectnode(node.node):
+                node = Node(np.array([]), (i,j))
+            nodes.append(node)
+    # 連結関係
+    for n in nodes:
+        if not rejectedge(n.node):
+
+        if not rejectedge(n.node):
+
+    return nodes, edges
 
 # ノードの除去
-def rejectnode(v):
+def rejectnode(node):
     # データが欠落していたら
-    if v == None:
+    if node == np.array([]):
         return True
     # 周囲4点との奥行きの差
-    elif v == True:
+    elif node == :
         return True
-    elif mse(v) > 100:
+    elif mse(node) > 999999:
         return True
     else:
         return False
 
 # 連結関係の除去
-def rejectedge(v1, v2, v3):
+def rejectedge(node1, node2, node3):
     # 欠落していなければ
-    if (v1 == []) and (v2 == []) and (v3 == []):
+    if (node1 == []) and (node2 == []) and (node3 == []):
         return True 
     # 法線のなす角
     elif :
@@ -405,12 +414,12 @@ def rejectedge(v1, v2, v3):
         return False
 
 # 平均二乗誤差の計算
-def mse(v):
-    if v == []:
+def mse(node):
+    if node == []:
         return math.inf
     else:
         pca = PCA()
-        return mean_squared_error(v, pca.fit(v))
+        return mean_squared_error(node, pca.fit(node))
 
 
 # 粗い平面検出

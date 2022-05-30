@@ -379,20 +379,20 @@ def initgraph(point_cloud, h=10, w=10):
             node = Node(point_cloud[i*h:i*h+h-1,j*w:j*w+w-1], (i,j))
             # nodeの除去の判定
             if rejectnode(node.node):
-                node = Node(np.array([]), (i,j))
-            nodes.append(node)
+                node = Node(None, (i,j))
+            nodes = nodes.append(node)
     # 連結関係
     for n in nodes:
         if not rejectedge(n.node):
-
+            edges = edges.append(n)
         if not rejectedge(n.node):
-
+            edges = edges.append()
     return nodes, edges
 
 # ノードの除去
 def rejectnode(node):
     # データが欠落していたら
-    if node == np.array([]):
+    if node == None:
         return True
     # 周囲4点との奥行きの差
     elif node == :
@@ -426,17 +426,17 @@ def mse(node):
 def ahcluster(graph):
     # MSEの昇順のヒープを作る
     queue = buildminmseheap()
-    boudaries = []
-    pai = []
+    boudaries = np.array()
+    pai = np.array()
     # queueの中身がある限り
     while queue != []:
         v = popmin(queue)
         # vがマージされているならば
         if v not in graph:
             continue
-        u_best = []
-        u_merge = []
-        # 
+        best = []
+        merge = []
+         
         for :
             # 連結関係のノードをマージする
             u_test = 

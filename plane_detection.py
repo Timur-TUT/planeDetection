@@ -6,6 +6,7 @@ from curses import pair_content
 from collections import deque
 from email import message
 from hashlib import new
+from lib2to3.pygram import python_grammar_no_print_statement
 import queue
 from re import L, U
 from ssl import VERIFY_X509_TRUSTED_FIRST
@@ -361,7 +362,7 @@ def fastplaneextraction(point_cloud):
     # 粗い平面検出(ステップ2)
     boudaries, pai = ahcluster(nodes, edges)
     # 粗い平面検出を精緻化(ステップ3)
-    cluster, pro_pai = refine(bousaries, pai)
+    cluster, pro_pai = refine(boudaries, pai)
     return cluster, pro_pai
 
 class Node:
@@ -382,6 +383,7 @@ def initgraph(point_cloud, h=10, w=10):
                 node = Node(None, (i,j))
             nodes = nodes.append(node)
     # 連結関係
+
     for n in nodes:
         if not rejectedge(n.node):
             edges = edges.append(n)
@@ -395,7 +397,7 @@ def rejectnode(node):
     if node == None:
         return True
     # 周囲4点との奥行きの差
-    elif node == :
+    elif node[] == :
         return True
     elif mse(node) > 999999:
         return True
@@ -408,7 +410,8 @@ def rejectedge(node1, node2, node3):
     if (node1 == []) and (node2 == []) and (node3 == []):
         return True 
     # 法線のなす角
-    elif :
+    #一定値
+    elif np.cross(node1, node3) > 999999:
         return True
     else:
         return False
@@ -423,23 +426,22 @@ def mse(node):
 
 
 # 粗い平面検出
-def ahcluster(graph):
+def ahcluster(nodes, edges):
     # MSEの昇順のヒープを作る
-    queue = buildminmseheap()
+    queue = buildminmseheap(nodes)
     boudaries = np.array()
     pai = np.array()
     # queueの中身がある限り
     while queue != []:
         v = popmin(queue)
         # vがマージされているならば
-        if v not in graph:
+        if v not in nodes:
             continue
-        best = []
-        merge = []
-         
-        for :
+        u_best = np.array()
+        u_merge = np.array()
+        for u in :
             # 連結関係のノードをマージする
-            u_test = 
+            u_test = u.append(v)
             # 一番MSEが小さいノードを選ぶ
             if mse(u_test) < mse(u_merge):
                 u_best = u
@@ -448,17 +450,23 @@ def ahcluster(graph):
         if mse(u_merge) >= 100:
             # vの大きさが一定以上ならば
             if abs(v) >= 100:
-                # 平面とみなす?s
-                boudaries = []
-                pai = plane(v)
+                # 平面とみなす
+                boudaries = boudaries.append(v)
+                pai = pai.append(plane(v))
                 # 差集合
-                v =
-                e = 
+                #連結関係の部分を削除？
+                edges = edges.remove()
+                nodes = nodes.remove(v)
         # マージ成功
+        # マージ後のu_mergeをそれぞれに追加しvとu_bestをそれぞれ削除する
         else:
-            queue.insert(u_merge)
-            e = 
-            v =
+            queue.append(u_merge)
+            edges = edges.append()
+            edges = edges.remove()
+            edges = edges.remove()
+            nodes = nodes.append(u_merge)
+            nodes = nodes.remove(v)
+            nodes = nodes.remove(u_best)
     return boudaries, pai
 
 # 平面近似PCA
@@ -467,10 +475,9 @@ def plane(v):
     return pca.fit(v)
 
 # ヒープの作成
-def buildminheap():
-    # 1つずつmseを計算し直して並べ替える?
-    queue = deque()
-    queue.append()
+def buildminmseheap(nodes):
+    # 1つずつmseを計算し直して並べ替える
+    queue = sorted(nodes, key=mse)
     return queue
 
 # 先頭を取り出す
@@ -480,43 +487,49 @@ def popmin(queue):
 
 
 # 粗い平面検出の精緻化
+#Bk,Rk,Rlは任意の順番のという意味かもしれない
 def refine(boundaries, pai):
     # キュー
-    queue = []
-    #
-    refine = []
-    # 最終的な図
-    final_graph = []
-    for boundary in boundaries:
-        refine_k = []
-        refine = 
-        # フチを取り除く
-        for :
-            if not in :
-                # vを除く
-                boundary = 
-        for :
-            # enqueue
-        if boundary == []:
-            # なんかしてる
-    while queue != []:
-        # dequeue
-        for p in :
-            if p >= 9 * mse() :
+    queue = deque()
+    refine = np.array()
+    rf_nodes = np.array()
+    rf_edges = np.array()
+    for k, boundary in enumerate(boundaries):
+        refine_k = np.array()
+        #謎ポイント
+        refine = refine.append(refine_k)
+        #フチを除く
+        for v in boundary:
+            #上下左右のノードが面内ではないならば
+            if v not in boundary:
+                #境界点判定
+                boundary = boundary.remove(v)
+        #面の中の更に境界といってる？
+        for p in boundary:
+            #kとは何の値？→インデックス？pとのタプルで追加しろといっている？
+            queue.append({p, k})
+        if boundary != None:
+            rf_nodes = rf_nodes.appned(boundary)
+    while queue != None:
+        points = queue.popleft()
+        k = points[1]
+        for p in points[0]:
+            if (p in boundary) or (p in refine_k) or (math.dist(p, pai[k]) >= 9 * mse(boundary[k])):
                 continue
-            if :
-                if :
-                    # enqueue
+            #lが存在するならば？l=k+1？
+            if (k+1 <= len(boundaries)) or (p in refine):
+                rf_edges = rf_edges.append({boundary_k,boundary_l})
+                if math.dist(p, pai[k]) < math.dist(p, pai[k+1]):
+                    refine_l = refine_l.remove(p)
+                    refine_k = refine_k.append(p)
             else:
-                refine = 
+                refine_k = refine_k.append(p)
+                queue.append({p, k})
                 # enqueue
     for refine_k in refine:
-        boundary = 
-    new_boundaries, pro_pai = ahcluster(final_graph)
-    return new_boundaries, pro_pai
-    
-
-
+        boundary_k = boundary_k.append(refine_k)
+    cluster, pro_pai = ahcluster(rf_nodes, rf_edges)
+    return cluster, pro_pai
 
 
 while True:
@@ -538,9 +551,6 @@ while True:
         depth_image = np.asanyarray(depth_frame.get_data())
         color_image = np.asanyarray(color_frame.get_data())
 
-        #ここに挟む候補1
-
-
         depth_colormap = np.asanyarray(
             colorizer.colorize(depth_frame).get_data())
 
@@ -552,13 +562,16 @@ while True:
         points = pc.calculate(depth_frame)
         pc.map_to(mapped_frame)
 
-        #ここに挟む候補2
-
         # Pointcloud data to arrays
         v, t = points.get_vertices(), points.get_texture_coordinates()
         verts = np.asanyarray(v).view(np.float32).reshape(-1, 3)  # xyz
         texcoords = np.asanyarray(t).view(np.float32).reshape(-1, 2)  # uv
 
+        #vertsが引数(中身をみてみる)
+        cluster, pai =  fastplaneextraction(verts)
+        
+    #3dを描画しないでcluster,paiを描画する
+    
     # Render
     now = time.time()
 

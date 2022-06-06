@@ -367,10 +367,10 @@ def fastplaneextraction(point_cloud):
 
 class Node:
     def __init__(self, node, index):
-        self.node = node    #np.array型の点群の集合(10×10)
-        self.i, self.j = index  #２次元上のインデックス
+        self.node = node    # np.array型の点群の集合(10×10)
+        self.i, self.j = index  # 次元上のインデックス
 
-# データ構造構築
+# データ構造構築２
 def initgraph(point_cloud, h=10, w=10):
     nodes = []
     edges = []
@@ -396,9 +396,10 @@ def rejectnode(node):
     # データが欠落していたら
     if node == None:
         return True
-    # 周囲4点との奥行きの差
+    # 周囲4点との奥行きの差、どう取り出す？
     elif node[] == :
         return True
+    # まだ決めていない
     elif mse(node) > 999999:
         return True
     else:
@@ -410,7 +411,7 @@ def rejectedge(node1, node2, node3):
     if (node1 == []) and (node2 == []) and (node3 == []):
         return True 
     # 法線のなす角
-    #一定値
+    # 一定値（まだ決めていない）
     elif np.cross(node1, node3) > 999999:
         return True
     else:
@@ -418,7 +419,7 @@ def rejectedge(node1, node2, node3):
 
 # 平均二乗誤差の計算
 def mse(node):
-    if node == []:
+    if node == None:
         return math.inf
     else:
         pca = PCA()
@@ -447,18 +448,19 @@ def ahcluster(nodes, edges):
                 u_best = u
                 u_merge = u_best
         # マージ失敗
-        if mse(u_merge) >= 100:
+        if mse(u_merge) >= 2500:
             # vの大きさが一定以上ならば
             if abs(v) >= 100:
                 # 平面とみなす
                 boudaries = boudaries.append(v)
                 pai = pai.append(plane(v))
                 # 差集合
-                #連結関係の部分を削除？
+                # 連結関係の部分を削除？
                 edges = edges.remove()
                 nodes = nodes.remove(v)
         # マージ成功
         # マージ後のu_mergeをそれぞれに追加しvとu_bestをそれぞれ削除する
+        # エッジ収縮
         else:
             queue.append(u_merge)
             edges = edges.append()
@@ -496,16 +498,16 @@ def refine(boundaries, pai):
     rf_edges = np.array()
     for k, boundary in enumerate(boundaries):
         refine_k = np.array()
-        #謎ポイント
+        # 謎ポイント
         refine = refine.append(refine_k)
-        #フチを除く
+        # フチを除く
         for v in boundary:
-            #上下左右のノードが面内ではないならば
+            # 上下左右のノードが面内ではないならば
             if v not in boundary:
                 #境界点判定
                 boundary = boundary.remove(v)
-        #面の中の更に境界といってる？
-        for p in boundary:
+        # 除去した境界のポイントを個別でみる
+        for p in v:
             #kとは何の値？→インデックス？pとのタプルで追加しろといっている？
             queue.append({p, k})
         if boundary != None:
@@ -516,7 +518,7 @@ def refine(boundaries, pai):
         for p in points[0]:
             if (p in boundary) or (p in refine_k) or (math.dist(p, pai[k]) >= 9 * mse(boundary[k])):
                 continue
-            #lが存在するならば？l=k+1？
+            # lが存在するならば？l=k+1？
             if (k+1 <= len(boundaries)) or (p in refine):
                 rf_edges = rf_edges.append({boundary_k,boundary_l})
                 if math.dist(p, pai[k]) < math.dist(p, pai[k+1]):
@@ -567,10 +569,10 @@ while True:
         verts = np.asanyarray(v).view(np.float32).reshape(-1, 3)  # xyz
         texcoords = np.asanyarray(t).view(np.float32).reshape(-1, 2)  # uv
 
-        #vertsが引数(中身をみてみる)
+        # vertsが引数(中身をみてみる)
         cluster, pai =  fastplaneextraction(verts)
         
-    #3dを描画しないでcluster,paiを描画する
+    # 3dを描画しないでcluster,paiを描画する
     
     # Render
     now = time.time()

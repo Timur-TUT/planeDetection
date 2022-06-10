@@ -15,7 +15,7 @@ from typing import final
 from xml.sax.handler import property_declaration_handler
 import graphlib
 import math
-from platform import node
+from platform import java_ver, node
 import time
 from turtle import right
 from typing_extensions import Self
@@ -368,12 +368,14 @@ def fastplaneextraction(point_cloud):
 class Node:
     def __init__(self, node, index):
         self.node = node    # np.array型の点群の集合(10×10)
-        self.i, self.j = index  # 次元上のインデックス
+        self.i, self.j = index[0], index[1]  # 次元上のインデックス
 
-# データ構造構築２
+# データ構造構築
 def initgraph(point_cloud, h=10, w=10):
     nodes = []
     edges = []
+    # 10×10が横にいくつあるかの数
+    num = 8
     for i in range(len(point_cloud)/h):
         for j in range(len(point_cloud[0])/W):
             # node は論文の v
@@ -383,21 +385,31 @@ def initgraph(point_cloud, h=10, w=10):
                 node = Node(None, (i,j))
             nodes = nodes.append(node)
     # 連結関係
-
-    for n in nodes:
-        if not rejectedge(n.node):
-            edges = edges.append(n)
-        if not rejectedge(n.node):
-            edges = edges.append()
+    for i in range(len(nodes)):
+        if (i == 0) or (i == len(nodes)-1):
+            continue
+        if not rejectedge(nodes[i-1].node, nodes[i].node, nodes[i+1].node):
+            # 追加形式が謎
+            edges = edges.append([nodes[i-1], nodes[i], nodes[i+1]])
+        if (i-num < 0) or (i+num > len(nodes)-1):
+            continue
+        if not rejectedge(nodes[i-num].node, nodes[i].nodes, nodes[i+num].node):
+            edges = edges.append([nodes[i-num], nodes[i], nodes[i+num]])
     return nodes, edges
 
 # ノードの除去
 def rejectnode(node):
-    # データが欠落していたら
+    # 周囲4点との差
+    for i in range(len(node)):
+        if (i - 1 < 0) or (i + 1 > len(node) - 1):
+            continue
+        for j in range(len(node[0])):
+            if (j - 1 < 0) or (j + 1 > len(node) - 1):
+                continue
+            if (abs(node[i][j] - node[i-1][j]) > 999) or (abs(node[i][j] - node[i+1][j]) > 999) or (abs(node[i][j] - node[i][j-1]) > 999) or (abs(node[i][j] - node[i][j+1]) > 999):
+                return True
+    # データが欠落していたら    
     if node == None:
-        return True
-    # 周囲4点との奥行きの差、どう取り出す？
-    elif node[] == :
         return True
     # まだ決めていない
     elif mse(node) > 999999:
@@ -408,7 +420,7 @@ def rejectnode(node):
 # 連結関係の除去
 def rejectedge(node1, node2, node3):
     # 欠落していなければ
-    if (node1 == []) and (node2 == []) and (node3 == []):
+    if (node1 == None) or (node2 == None) or (node3 == None):
         return True 
     # 法線のなす角
     # 一定値（まだ決めていない）

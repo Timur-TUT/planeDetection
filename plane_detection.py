@@ -452,13 +452,17 @@ def ahcluster(nodes, edges):
             continue
         u_best = np.array()
         u_merge = np.array()
-        for u in :
+        # vと連結関係にあるuを取り出して
+        for u in edges:
             # 連結関係のノードをマージする
-            u_test = u.append(v)
+            # 縦なら1行目,横なら2行目
+            u_test = np.append(u, v, axis=0)
+            u_test = np.append(u, v, axis=1)
             # 一番MSEが小さいノードを選ぶ
             if mse(u_test) < mse(u_merge):
+                # 連結しているノードの中で一番優秀なものをbest,くっつけた状態のものをmargeへ暫定的に
                 u_best = u
-                u_merge = u_best
+                u_merge = u_test
         # マージ失敗
         if mse(u_merge) >= 2500:
             # vの大きさが一定以上ならば

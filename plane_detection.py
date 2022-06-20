@@ -369,6 +369,27 @@ class Node:
     def __init__(self, node, index):
         self.node = node    # np.array型の点群の集合(10×10)
         self.i, self.j = index[0], index[1]  # 次元上のインデックス
+        self.left = 0
+        self.right = 0
+        self.up = 0
+        self.down = 0
+        self.links = []
+    
+    # 上下左右をみる
+    def look_araund(self, nodes, index, width):
+        if index - 1 >= 0:
+            self.left = nodes[index-1]
+        if index + 1 <= len(nodes):
+            self.right = nodes[index+1]
+        if index - width >= 0:
+            self.up = nodes[index-width]
+        if index + width <= len(nodes):
+            self.down = nodes[index+width]
+
+    # 連結情報の登録
+    def make_links(self, node_1, node_2):
+        self.links.append(node_1)
+        self.links.append(node_2)
 
 # データ構造構築
 def initgraph(point_cloud, h=10, w=10):
@@ -472,6 +493,7 @@ def ahcluster(nodes, edges):
                 pai = pai.append(plane(v))
                 # 差集合
                 # 連結関係の部分を削除？
+                # uvの連結関係を追加
                 edges = edges.remove()
                 nodes = nodes.remove(v)
         # マージ成功
@@ -480,8 +502,8 @@ def ahcluster(nodes, edges):
         else:
             queue.append(u_merge)
             edges = edges.append()
-            edges = edges.remove()
-            edges = edges.remove()
+            edges = edges.remove(u_best)
+            edges = edges.remove(v)
             nodes = nodes.append(u_merge)
             nodes = nodes.remove(v)
             nodes = nodes.remove(u_best)
@@ -505,7 +527,7 @@ def popmin(queue):
 
 
 # 粗い平面検出の精緻化
-#Bk,Rk,Rlは任意の順番のという意味かもしれない
+# Bk,Rk,Rlは任意の順番のという意味かもしれない
 def refine(boundaries, pai):
     # キュー
     queue = deque()
@@ -520,11 +542,11 @@ def refine(boundaries, pai):
         for v in boundary:
             # 上下左右のノードが面内ではないならば
             if v not in boundary:
-                #境界点判定
+                # 境界点判定
                 boundary = boundary.remove(v)
         # 除去した境界のポイントを個別でみる
         for p in v:
-            #kとは何の値？→インデックス？pとのタプルで追加しろといっている？
+            # kとは何の値？→インデックス？pとのタプルで追加しろといっている？
             queue.append({p, k})
         if boundary != None:
             rf_nodes = rf_nodes.appned(boundary)
@@ -548,6 +570,9 @@ def refine(boundaries, pai):
         boundary_k = boundary_k.append(refine_k)
     cluster, pro_pai = ahcluster(rf_nodes, rf_edges)
     return cluster, pro_pai
+
+    # C++を参考にしながら
+
 
 
 while True:
@@ -589,7 +614,7 @@ while True:
         cluster, pai =  fastplaneextraction(verts)
         
     # 3dを描画しないでcluster,paiを描画する
-    
+
     # Render
     now = time.time()
 

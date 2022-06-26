@@ -271,89 +271,6 @@ def pointcloud(out, verts, texcoords, color, painter=True):
 
 out = np.empty((h, w, 3), dtype=np.uint8)
 
-'''
-# 5/23まで
-# nodeクラスの作成
-class node:
-    def __init__(self, points):
-        self.node = points
-        self.mse = None
-
-    def make_mse(self):
-        self.mse = 0
-
-#nodeを作成
-def make_grouping(points, x, y):
-    
-    return node
-
-#nodeを除去
-def dele_node(node):
-    for i in range(10):
-        for j in range(10):
-            node[i][j] = 0
-
-def remove_miss(node):
-    #誤差の値
-    mse_value = 100
-    sur_value = 3
-    #主成分分析
-    for i in range(10):
-        for j in range(10):
-            if node[i][j] == None:
-                dele_node(node)
-                return
-
-
-    node_pca = PCA(n_components=2).fit(node)
-    #誤差の大きさが一定以上ならば
-    if mean_squared_error(node_pca, node) >= mse_value:
-        #除去する
-        dele_node(node)
-        return
-    
-    #上下左右の仮値
-    up = 0
-    down = 0
-    right = 0
-    left = 0
-    center = 0
-
-    #上下左右の値をとる
-    for i in range(10):
-        for j in range(10):
-            center = node[i][j]
-            try:
-                up = node[i-1][j]
-            except:
-                up = center
-            if abs(center - up) >= sur_value:
-                dele_node(node)
-                return
-            try:
-                down = node[i+1][j]
-            except:
-                down = center
-            if abs(center - down) >= sur_value:
-                dele_node(node)
-                return
-            try:
-                right = node[i][j+1]
-            except:
-                right = center
-            if abs(center - right) >= sur_value:
-                dele_node(node)
-                return
-            try:
-                left = node[i][j-1]
-            except:
-                left = center
-            if abs(center - left) >= sur_value:
-                dele_node(node)
-                return
-'''
-
-# 5/30まで
 # 処理の概形
 # 入力は2次元になった
 def fastplaneextraction(point_cloud):
@@ -369,36 +286,60 @@ class Node:
     def __init__(self, node, index):
         self.node = node    # np.array型の点群の集合(10×10)
         self.i, self.j = index[0], index[1]  # 次元上のインデックス
-        self.left = 0
-        self.right = 0
-        self.up = 0
-        self.down = 0
-        self.links = []
+        self.left = None
+        self.right = None
+        self.up = None
+        self.down = None
+        self.linked_left = None
+        self.linked_right = None
+        self.linked_up = None
+        self.linked_down = None
     
     # 上下左右をみる
-    def look_araund(self, nodes, index, width):
+    def look_around(self, nodes, index, width):
         if index - 1 >= 0:
             self.left = nodes[index-1]
-        if index + 1 <= len(nodes):
+        else:
+            self.left = None
+        if index + 1 <= len(nodes) - 1:
             self.right = nodes[index+1]
+        else:
+            self.right = None
         if index - width >= 0:
             self.up = nodes[index-width]
-        if index + width <= len(nodes):
+        else:
+            self.up = None
+        if index + width <= len(nodes) - 1:
             self.down = nodes[index+width]
+        else:
+            self.down = None
 
     # 連結情報の登録
-    def make_links(self, node_1, node_2):
-        self.links.append(node_1)
-        self.links.append(node_2)
+    def make_links_ud(self, node_1, node_2):
+        self.linked_up = node_1
+        self.linked_down = node_2
+    
+    def make_links_lr(self, node_1, node_2):
+        self.linked_left = node_1
+        self.linked_right = node_2
+
+class DoublyLinkedList():
+    def __init__(self):
+        self.head = None
+        self.tail = None
+        self.length = 0
+
+    def
 
 # データ構造構築
 def initgraph(point_cloud, h=10, w=10):
     nodes = []
-    edges = []
+    #edges = []
     # 10×10が横にいくつあるかの数
-    num = 8
-    for i in range(len(point_cloud)/h):
-        for j in range(len(point_cloud[0])/W):
+    width = len(point_cloud[0]) / W 
+    height = len(point_cloud) / h
+    for i in range(height):
+        for j in range(width):
             # node は論文の v
             node = Node(point_cloud[i*h:i*h+h-1,j*w:j*w+w-1], (i,j))
             # nodeの除去の判定
@@ -406,17 +347,18 @@ def initgraph(point_cloud, h=10, w=10):
                 node = Node(None, (i,j))
             nodes = nodes.append(node)
     # 連結関係
-    for i in range(len(nodes)):
-        if (i == 0) or (i == len(nodes)-1):
-            continue
-        if not rejectedge(nodes[i-1].node, nodes[i].node, nodes[i+1].node):
+    for index in range(len(nodes)):
+        if node[index] != None:
+            node[index].look_around(nodes, index, width)
+    for index in range(len(nodes)):
+        if not rejectedge(nodes[index].left.node, nodes[index].node, nodes[index].right.node):
             # 追加形式が謎
-            edges = edges.append([nodes[i-1], nodes[i], nodes[i+1]])
-        if (i-num < 0) or (i+num > len(nodes)-1):
-            continue
-        if not rejectedge(nodes[i-num].node, nodes[i].nodes, nodes[i+num].node):
-            edges = edges.append([nodes[i-num], nodes[i], nodes[i+num]])
-    return nodes, edges
+            nodes[index].make_links(nodes[index].left, nodes[index].right)
+            # edges = edges.append([nodes[i-1], nodes[i], nodes[i+1]])
+        if not rejectedge(nodes[index].up.node, nodes[index].nodes, nodes[index].down.node):
+            nodes[index].make_links(nodes[index].up, nodes[index].down)
+            # edges = edges.append([nodes[i-num], nodes[i], nodes[i+num]])
+    return nodes
 
 # ノードの除去
 def rejectnode(node):
@@ -445,7 +387,9 @@ def rejectedge(node1, node2, node3):
         return True 
     # 法線のなす角
     # 一定値（まだ決めていない）
-    elif np.cross(node1, node3) > 999999:
+    elif np.cross(node1, node2) > 999999:
+        return True
+    elif np.cross(node2, node3) > 999999:
         return True
     else:
         return False
@@ -467,14 +411,14 @@ def ahcluster(nodes, edges):
     pai = np.array()
     # queueの中身がある限り
     while queue != []:
-        v = popmin(queue)
+        suf = popmin(queue)
         # vがマージされているならば
-        if v not in nodes:
+        if suf not in nodes:
             continue
         u_best = np.array()
         u_merge = np.array()
         # vと連結関係にあるuを取り出して
-        for u in edges:
+        for cand in suf.links:
             # 連結関係のノードをマージする
             # 縦なら1行目,横なら2行目
             u_test = np.append(u, v, axis=0)
@@ -570,10 +514,6 @@ def refine(boundaries, pai):
         boundary_k = boundary_k.append(refine_k)
     cluster, pro_pai = ahcluster(rf_nodes, rf_edges)
     return cluster, pro_pai
-
-    # C++を参考にしながら
-
-
 
 while True:
     # Grab camera data

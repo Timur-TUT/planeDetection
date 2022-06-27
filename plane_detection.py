@@ -6,11 +6,13 @@ from curses import pair_content
 from collections import deque
 from email import message
 from hashlib import new
+from http.client import NETWORK_AUTHENTICATION_REQUIRED
 from lib2to3.pygram import python_grammar_no_print_statement
 import queue
 from re import L, U
 from ssl import VERIFY_X509_TRUSTED_FIRST
 from tkinter import E, INSERT, W
+from tkinter.messagebox import NO
 from typing import final
 from xml.sax.handler import property_declaration_handler
 import graphlib
@@ -282,59 +284,204 @@ def fastplaneextraction(point_cloud):
     cluster, pro_pai = refine(boudaries, pai)
     return cluster, pro_pai
 
+# グループのクラス
 class Node:
-    def __init__(self, node, index):
+    def __init__(self, node, index=None):
         self.node = node    # np.array型の点群の集合(10×10)
         self.i, self.j = index[0], index[1]  # 次元上のインデックス
         self.left = None
         self.right = None
         self.up = None
         self.down = None
+
+    # 上下左右をみる
+    def look_around(self, nodes, index, width):
+        if index - 1 >= 0:
+            self.left = index - 1
+        else:
+            self.left = None
+        if index + 1 <= len(nodes) - 1:
+            self.right = index + 1
+        else:
+            self.right = None
+        if index - width >= 0:
+            self.up = index - width
+        else:
+            self.up = None
+        if index + width <= len(nodes) - 1:
+            self.down = index + width
+        else:
+            self.down = None
+
+# 双方向リストの要素のクラス
+class DLNodes:
+    def __init__(self, node):
+        self.node = node
+        self.next = None
+        self.prev = None
+        """    
         self.linked_left = None
         self.linked_right = None
         self.linked_up = None
         self.linked_down = None
-    
-    # 上下左右をみる
-    def look_around(self, nodes, index, width):
-        if index - 1 >= 0:
-            self.left = nodes[index-1]
-        else:
-            self.left = None
-        if index + 1 <= len(nodes) - 1:
-            self.right = nodes[index+1]
-        else:
-            self.right = None
-        if index - width >= 0:
-            self.up = nodes[index-width]
-        else:
-            self.up = None
-        if index + width <= len(nodes) - 1:
-            self.down = nodes[index+width]
-        else:
-            self.down = None
+        """
 
-    # 連結情報の登録
-    def make_links_ud(self, node_1, node_2):
-        self.linked_up = node_1
-        self.linked_down = node_2
-    
-    def make_links_lr(self, node_1, node_2):
-        self.linked_left = node_1
-        self.linked_right = node_2
-
-class DoublyLinkedList():
+# 双方向リストのためのクラス
+class DoublyLinkedList:
     def __init__(self):
         self.head = None
         self.tail = None
         self.length = 0
 
-    def
+    # 新しいNodeを作る(最後尾追加)
+    def push(self, val):
+        new_node = DLNodes(val)
+        if (not self.head):
+            self.head = new_node
+            self.tail = self.head
+        else:
+            self.head.next = new_node
+            new_node.prev = self.tail
+            self.tail = new_node
+        
+        self.length = self.length + 1
+        return self
+    
+    # 新しいNodeを作る(先頭追加)
+    def unshift(self, val):
+        new_node = DLNodes(val)
+        if (self.length == 0):
+            self.head = new_node
+            self.tail = new_node
+        else:
+            self.head.prev = new_node
+            new_node.next = self.head
+            self.head = new_node
+        self.length = self.length + 1
+        return self
+
+    # リストの最後尾の要素を取得しリストから削除
+    def pop(self):
+        if (not self.head):
+            return None
+        
+        current_tail = self.tail
+        if (self.length == 1):
+            self.tail = None
+            self.head = None
+        else:
+            self.tail = self.tail.prev
+            self.tail.next = None
+            current_tail.prev = None
+
+        self.length = self.length - 1
+        return current_tail
+
+    # リストの最初の要素を取得しリストから削除
+    def shift(self):
+        if (self.length == 0):
+            return None
+        
+        old_head = self.head
+        if (self.length == 1):
+            self.head = None
+            self.tail = None
+        else:
+            self.head = old_head.next
+            self.head.prev = None
+            old_head.next = None
+    
+        self.length = self.length - 1
+        return old_head
+
+    # インデックス番号の要素を取得
+    def get(self, index):
+        if ((index < 0) or (index > self.length)):
+            return None
+
+        half_of_length = self.length // 2
+        if (index <= half_of_length):
+            counter = 0
+            current = self.head
+            while(counter != index):
+                current = current.next
+                counter += 1
+            return current
+        elif(index > half_of_length):
+            counter = self.length - 1
+            current = self.tail
+            while(counter != index):
+                current = current.prev
+                counter -= 1
+            return current
+    
+    # インデックス番号を指定して中身を指定したものに書き換え
+    def set(self, index, val):
+        target_node = self.get(index)
+        if(target_node):
+            target_node.node = val
+            return True
+        else:
+            return False
+
+    # インデックス番号を指定してその位置に新たなnodeを挿入する
+    def insert(self, index, val):
+        if ((index < 0) or (index > self.length)):
+            return False
+        if (index == 0):
+            self.unshift(val)
+        if (index == self.length):
+            self.push(val)
+        
+        prev_node = self.get(index - 1)
+        new_node = DLNodes(val)
+        next_node = prev_node.next
+        prev_node.next = new_node
+        new_node.prev = prev_node
+        next_node.prev = new_node
+        new_node.next = next_node
+        self.length = self.length + 1
+
+        return True
+    
+
+    # インデックス番号を指定してその位置の要素を削除する
+    def remove(self, index):
+        if ((index < 0) or (index >= self.length)):
+            return None
+        if (index == 0):
+            self.shift()
+        if (index == self.length - 1):
+            self.pop()
+        removed_node = self.get(index)
+        removed_node.prev.next = removed_node.next
+        removed_node.next.prev = removed_node.prev
+        removed_node.next = None
+        removed_node.prev = None
+
+        self.length = self.length - 1
+        return removed_node
+
+
+    # 中身を指定して一致するものとインデックス番号を取得
+    def catch(self, target):
+        catch_node = self.head
+        counter = 0
+        while (counter < self.length):
+            if target is catch_node.node:
+                return catch_node, counter
+            else:
+                catch_node = catch_node.next
+                counter += 1
+        
+        return False
+
+
 
 # データ構造構築
 def initgraph(point_cloud, h=10, w=10):
     nodes = []
-    #edges = []
+    edges = DoublyLinkedList()
     # 10×10が横にいくつあるかの数
     width = len(point_cloud[0]) / W 
     height = len(point_cloud) / h
@@ -350,13 +497,12 @@ def initgraph(point_cloud, h=10, w=10):
     for index in range(len(nodes)):
         if node[index] != None:
             node[index].look_around(nodes, index, width)
-    for index in range(len(nodes)):
-        if not rejectedge(nodes[index].left.node, nodes[index].node, nodes[index].right.node):
-            # 追加形式が謎
-            nodes[index].make_links(nodes[index].left, nodes[index].right)
+    for node in nodes:
+        if not rejectedge(nodes[node.left].node, node.node, nodes[node.right].node):
+            edges.push()
             # edges = edges.append([nodes[i-1], nodes[i], nodes[i+1]])
-        if not rejectedge(nodes[index].up.node, nodes[index].nodes, nodes[index].down.node):
-            nodes[index].make_links(nodes[index].up, nodes[index].down)
+        if not rejectedge(nodes[node.up].node, node.node, nodes[node.down].node):
+            edges.push()
             # edges = edges.append([nodes[i-num], nodes[i], nodes[i+num]])
     return nodes
 
@@ -418,6 +564,7 @@ def ahcluster(nodes, edges):
         u_best = np.array()
         u_merge = np.array()
         # vと連結関係にあるuを取り出して
+        x_node, index = edges.catch(suf)
         for cand in suf.links:
             # 連結関係のノードをマージする
             # 縦なら1行目,横なら2行目

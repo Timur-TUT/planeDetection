@@ -2,6 +2,7 @@
 # @author Yasu
 
 from collections import deque
+from errno import EDEADLK
 import math
 import time
 import cv2
@@ -37,7 +38,6 @@ class Node:
 def initgraph(depth_image, h=10, w=10):
     nodes = []
     edges = []
-
     # 10×10が横にいくつあるかの数
     width = len(depth_image[0]) // w 
     height = len(depth_image) // h
@@ -48,47 +48,77 @@ def initgraph(depth_image, h=10, w=10):
             node = Node(depth_image[i*h:i*h+h-1,j*w:j*w+w-1])
             # nodeの除去の判定
             if rejectnode(node.node):
-                node = Node(None)
+                node = Node([])
             nodes_line.append(node)
         nodes.append(nodes_line)
     # 上下左右のノードを見つける
-    for index_line in range(nodes):
-        for index in range(index_line):
-            if node[index_line][index] != None:
+    for index_line in range(len(nodes)):
+        for index in range(len(nodes[index_line])):
+            node = nodes[index_line][index]
+
+            if node.node != []:
+                # 上
                 try:
-                    
-        if not rejectedge(node.left.node, node.node, node.right.node):
-            edges.push()
-            # edges = edges.append([nodes[i-1], nodes[i], nodes[i+1]])
-        if not rejectedge(nodes[node.up].node, node.node, nodes[node.down].node):
-            edges.push()
-            # edges = edges.append([nodes[i-num], nodes[i], nodes[i+num]])
-    return nodes
+                    if not rejectedge(node, nodes[index_line-1][index]):
+                        node.up = nodes[index_line-1][index]
+                        edges.append(node)
+                except:
+                    node.up = None
+                # 下
+                try:
+                    if not rejectedge(node, nodes[index_line+1][index]):
+                        node.down = nodes[index_line+1][index]
+                        edges.append(node)
+                except:
+                    node.down = None
+                # 左
+                try:
+                    if not rejectedge(node, nodes[index_line][index-1]):
+                        node.left = nodes[index_line][index-1]
+                        edges.append(node)
+                except:
+                    node.left = None
+                # 右
+                try:
+                    if not rejectedge(node, nodes[index_line][index+1]):
+                        node.right = nodes[index_line][index+1]
+                        edges.append(node)
+                except:
+                    node.right = None
+            else:
+                pass
+
+    else:
+        edges = list(set(edges))
+        
+    return nodes, edges
 
 # ノードの除去
 def rejectnode(node):
+    # データが欠落していたら
+    for points in node:
+        for point in points:    
+            if point == None:
+                return True
     # 周囲4点との差
     for i in range(len(node)):
-        if (i - 1 < 0) or (i + 1 > len(node) - 1):
+        if (i - 1 < 0) or (i + 1 >= len(node)):
             continue
-        for j in range(len(node[0])):
-            if (j - 1 < 0) or (j + 1 > len(node) - 1):
+        for j in range(len(node[i])):
+            if (j - 1 < 0) or (j + 1 >= len(node)):
                 continue
             if (abs(node[i][j] - node[i-1][j]) > 999) or (abs(node[i][j] - node[i+1][j]) > 999) or (abs(node[i][j] - node[i][j-1]) > 999) or (abs(node[i][j] - node[i][j+1]) > 999):
                 return True
-    # データが欠落していたら    
-    if node == None:
-        return True
     # まだ決めていない
-    elif mse(node) > 999999:
-        return True
+    # if mse(node) > 999999:
+        # return True
     else:
         return False
 
 # 連結関係の除去
 def rejectedge(node1, node2):
     # 欠落していなければ
-    if (node1 == None) or (node2 == None):
+    if (node1.all() == False) or (node2.all() == False):
         return True 
     # 法線のなす角
     # 一定値（まだ決めていない）
@@ -99,7 +129,7 @@ def rejectedge(node1, node2):
 
 # 平均二乗誤差の計算
 def mse(node):
-    if node == None:
+    if node.all() == False:
         return math.inf
     else:
         pca = PCA()

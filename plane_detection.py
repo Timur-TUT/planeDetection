@@ -3,7 +3,6 @@
 
 from collections import deque
 import math
-import time
 import cv2
 import numpy as np
 import pyrealsense2 as rs
@@ -24,8 +23,8 @@ def fast_plane_extraction(depth_image):
 
 # グループのクラス
 class Node:
-    def __init__(self, node):
-        self.node = node    # np.array型の点群の集合(10×10)
+    def __init__(self, data):
+        self.data = data    # np.array型の点群の集合(10×10)
         self.group_num = 0 # グループの番号,初期値0
         # 上下左右のノード
         self.left = None
@@ -41,46 +40,49 @@ def initgraph(depth_image, h=10, w=10):
     # 10×10が横にいくつあるかの数
     width = len(depth_image[0]) // w 
     height = len(depth_image) // h
+
     for i in range(height):
         nodes_line = []
         for j in range(width):
             # node は論文の v
             node = Node(depth_image[i*h:i*h+h-1,j*w:j*w+w-1])
             # nodeの除去の判定
-            if rejectnode(node.node):
+            if reject_node(node):
                 node = Node(None)
             nodes_line.append(node)
         nodes.append(nodes_line)
-    # 上下左右のノードを見つける
-    for index_line in range(nodes):
-        for index in range(index_line):
-            if node[index_line][index] != None:
-                try:
-                    
-        if not rejectedge(node.left.node, node.node, node.right.node):
-            edges.push()
-            # edges = edges.append([nodes[i-1], nodes[i], nodes[i+1]])
-        if not rejectedge(nodes[node.up].node, node.node, nodes[node.down].node):
-            edges.push()
-            # edges = edges.append([nodes[i-num], nodes[i], nodes[i+num]])
-    return nodes
+
+    # 右・下の繋がりを調べる
+    for i in range(len(nodes)):
+        for j in range(len(nodes[0])):
+            if nodes[i][j].data != None:
+                if j+1<len(nodes[0]) and not rejectedge(nodes[i][j], nodes[i][j+1]): #indexエラーをこれで回避できるか分からん
+                    nodes[i][j].right = nodes[i][j+1]
+                    nodes[i][j+1].left = nodes[i][j]
+                    edges.append(nodes[i][j])
+                if i+1<len(nodes) and not rejectedge(nodes[i][j], nodes[i+1][j]):
+                    nodes[i][j].down = nodes[i+1][j]
+                    nodes[i+1][j].up = nodes[i][j]
+                    edges.append(nodes[i][j])
+
+    return nodes, list(set(edges))
 
 # ノードの除去
-def rejectnode(node):
+def reject_node(node):
+    data = node.data
     # 周囲4点との差
-    for i in range(len(node)):
-        if (i - 1 < 0) or (i + 1 > len(node) - 1):
-            continue
-        for j in range(len(node[0])):
-            if (j - 1 < 0) or (j + 1 > len(node) - 1):
-                continue
-            if (abs(node[i][j] - node[i-1][j]) > 999) or (abs(node[i][j] - node[i+1][j]) > 999) or (abs(node[i][j] - node[i][j-1]) > 999) or (abs(node[i][j] - node[i][j+1]) > 999):
-                return True
+    for i in range(len(data)):
+        for j in range(len(data[0])):
+            try:
+                if (abs(data[i][j] - data[i-1][j]) > 999) or (abs(data[i][j] - data[i+1][j]) > 999) or (abs(data[i][j] - data[i][j-1]) > 999) or (abs(data[i][j] - data[i][j+1]) > 999):
+                    return True
+            except IndexError:
+                pass
     # データが欠落していたら    
-    if node == None:
+    if data == None:
         return True
     # まだ決めていない
-    elif mse(node) > 999999:
+    elif mse(data) > 999999:
         return True
     else:
         return False
@@ -88,11 +90,11 @@ def rejectnode(node):
 # 連結関係の除去
 def rejectedge(node1, node2):
     # 欠落していなければ
-    if (node1 == None) or (node2 == None):
+    if node2.data == None:
         return True 
     # 法線のなす角
     # 一定値（まだ決めていない）
-    elif np.cross(node1, node2) > 999999:
+    elif np.cross(node1.data, node2.data) > 999999:
         return True
     else:
         return False
@@ -104,7 +106,6 @@ def mse(node):
     else:
         pca = PCA()
         return mean_squared_error(node, pca.fit(node))
-
 
 # 粗い平面検出
 def ahcluster(nodes, edges):
@@ -172,7 +173,6 @@ def buildminmseheap(nodes):
 def popmin(queue):
     choice = queue.popleft()
     return choice
-
 
 # 粗い平面検出の精緻化
 # Bk,Rk,Rlは任意の順番のという意味かもしれない
@@ -267,3 +267,4 @@ if __name__ == '__main__':
             pipeline.stop()
             cv2.destroyAllWindows()
             break
+        

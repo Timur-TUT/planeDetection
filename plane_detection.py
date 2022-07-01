@@ -90,7 +90,7 @@ def initgraph(depth_image, h=10, w=10):
 
     else:
         edges = list(set(edges))
-        
+
     return nodes, edges
 
 # ノードの除去
@@ -133,6 +133,7 @@ def mse(node):
         return math.inf
     else:
         pca = PCA()
+        # nodeとpca.fit()の型が合っていないためエラーがでる
         return mean_squared_error(node, pca.fit(node))
 
 

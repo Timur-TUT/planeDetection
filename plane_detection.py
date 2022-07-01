@@ -27,33 +27,16 @@ class Node:
     def __init__(self, node):
         self.node = node    # np.array型の点群の集合(10×10)
         self.group_num = 0 # グループの番号,初期値0
+        # 上下左右のノード
         self.left = None
         self.right = None
         self.up = None
         self.down = None
 
-    # 上下左右をみる
-    def look_around(self, nodes, index_line, index):
-        if index - 1 >= 0:
-            self.left = nodes[index_line][index - 1]
-        else:
-            self.left = None
-        if index + 1 < len(nodes[0]):
-            self.right = nodes[index_line][index + 1]
-        else:
-            self.right = None
-        if index_line - 1 >= 0:
-            self.up = nodes[index_line - 1][index]
-        else:
-            self.up = None
-        if index_line < len(nodes):
-            self.down = nodes[index_line + 1][index]
-        else:
-            self.down = None
-
 # データ構造構築
 def initgraph(depth_image, h=10, w=10):
     nodes = []
+    edges = []
 
     # 10×10が横にいくつあるかの数
     width = len(depth_image[0]) // w 
@@ -72,9 +55,9 @@ def initgraph(depth_image, h=10, w=10):
     for index_line in range(nodes):
         for index in range(index_line):
             if node[index_line][index] != None:
-                node[index_line][index].look_around(nodes, index_line, index)
-    for node in nodes:
-        if not rejectedge(nodes[node.left].node, node.node, nodes[node.right].node):
+                try:
+                    
+        if not rejectedge(node.left.node, node.node, node.right.node):
             edges.push()
             # edges = edges.append([nodes[i-1], nodes[i], nodes[i+1]])
         if not rejectedge(nodes[node.up].node, node.node, nodes[node.down].node):
@@ -103,15 +86,13 @@ def rejectnode(node):
         return False
 
 # 連結関係の除去
-def rejectedge(node1, node2, node3):
+def rejectedge(node1, node2):
     # 欠落していなければ
-    if (node1 == None) or (node2 == None) or (node3 == None):
+    if (node1 == None) or (node2 == None):
         return True 
     # 法線のなす角
     # 一定値（まだ決めていない）
     elif np.cross(node1, node2) > 999999:
-        return True
-    elif np.cross(node2, node3) > 999999:
         return True
     else:
         return False

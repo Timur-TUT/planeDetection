@@ -19,13 +19,15 @@ def fast_plane_extraction(depth_image):
     # # 粗い平面検出を精緻化(ステップ3)
     # cluster, pro_pai = refine(boudaries, pai)
     # return cluster, pro_pai
-    return nodes, edges
+    return None, None
 
 # グループのクラス
 class Node:
     def __init__(self, data):
         self.data = data    # np.array型の点群の集合(10×10)
         self.group_num = 0 # グループの番号,初期値0
+        self.rejected = False #reject_nodeに当てはまったかどうか
+
         # 上下左右のノード
         self.left = None
         self.right = None
@@ -45,18 +47,18 @@ def initgraph(depth_image, h=10, w=10):
         nodes_line = []
         for j in range(width):
             # node は論文の v
-            node = Node(depth_image[i*h:i*h+h-1,j*w:j*w+w-1])
+            node = Node(depth_image[i*h:i*h+h,j*w:j*w+w])
             # nodeの除去の判定
             if reject_node(node):
-                node = Node(None)
+                node.rejected = True
             nodes_line.append(node)
         nodes.append(nodes_line)
 
     # 右・下の繋がりを調べる
     for i in range(len(nodes)):
         for j in range(len(nodes[0])):
-            if nodes[i][j].data != None:
-                if j+1<len(nodes[0]) and not rejectedge(nodes[i][j], nodes[i][j+1]): #indexエラーをこれで回避できるか分からん
+            if not nodes[i][j].rejected:
+                if j+1<len(nodes[0]) and not rejectedge(nodes[i][j], nodes[i][j+1]): #書き方不安
                     nodes[i][j].right = nodes[i][j+1]
                     nodes[i][j+1].left = nodes[i][j]
                     edges.append(nodes[i][j])
@@ -65,18 +67,18 @@ def initgraph(depth_image, h=10, w=10):
                     nodes[i+1][j].up = nodes[i][j]
                     edges.append(nodes[i][j])
 
-    return nodes, list(set(edges))
+    return nodes, edges
 
 # ノードの除去
 def reject_node(node, threshold=999):
     data = node.data
     # データが欠落していたら    
-    if data == None:
+    if np.any(data == 0):
         return True
 
     # 周囲4点との差
-    v_diff = np.diff(data, axis=0)
-    h_diff = np.diff(data)
+    v_diff = np.diff(data, axis=0)  #縦方向の差
+    h_diff = np.diff(data)          #横方向の差
 
     if v_diff.max() > threshold or h_diff.max() > threshold:
         return True
@@ -91,22 +93,24 @@ def reject_node(node, threshold=999):
 # 連結関係の除去
 def rejectedge(node1, node2):
     # 欠落していなければ
-    if node2.data == None:
+    if np.any(node2.data == 0):
         return True 
     # 法線のなす角
     # 一定値（まだ決めていない）
-    elif np.cross(node1.data, node2.data) > 999999:
+    outer = np.outer(node1.data, node2.data)
+
+    if  np.any(outer > 999999):
         return True
     else:
         return False
 
 # 平均二乗誤差の計算
 def mse(array):
-    if array == None:
+    if np.any(array == 0):
         return math.inf
     else:
         pca = PCA()
-        return mean_squared_error(array, pca.fit(array))
+        return mean_squared_error(array, pca.fit_transform(array))  #合ってるか不安
 
 # 粗い平面検出
 def ahcluster(nodes, edges):

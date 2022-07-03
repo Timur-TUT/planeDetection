@@ -19,7 +19,7 @@ def fast_plane_extraction(depth_image):
     # # 粗い平面検出を精緻化(ステップ3)
     # cluster, pro_pai = refine(boudaries, pai)
     # return cluster, pro_pai
-    return None, None
+    return nodes, edges
 
 # グループのクラス
 class Node:
@@ -68,22 +68,23 @@ def initgraph(depth_image, h=10, w=10):
     return nodes, list(set(edges))
 
 # ノードの除去
-def reject_node(node):
+def reject_node(node, threshold=999):
     data = node.data
-    # 周囲4点との差
-    for i in range(len(data)):
-        for j in range(len(data[0])):
-            try:
-                if (abs(data[i][j] - data[i-1][j]) > 999) or (abs(data[i][j] - data[i+1][j]) > 999) or (abs(data[i][j] - data[i][j-1]) > 999) or (abs(data[i][j] - data[i][j+1]) > 999):
-                    return True
-            except IndexError:
-                pass
     # データが欠落していたら    
     if data == None:
         return True
+
+    # 周囲4点との差
+    v_diff = np.diff(data, axis=0)
+    h_diff = np.diff(data)
+
+    if v_diff.max() > threshold or h_diff.max() > threshold:
+        return True
+
     # まだ決めていない
     elif mse(data) > 999999:
         return True
+
     else:
         return False
 
@@ -100,17 +101,17 @@ def rejectedge(node1, node2):
         return False
 
 # 平均二乗誤差の計算
-def mse(node):
-    if node == None:
+def mse(array):
+    if array == None:
         return math.inf
     else:
         pca = PCA()
-        return mean_squared_error(node, pca.fit(node))
+        return mean_squared_error(array, pca.fit(array))
 
 # 粗い平面検出
 def ahcluster(nodes, edges):
     # MSEの昇順のヒープを作る
-    queue = buildminmseheap(nodes)
+    queue = build_mse_heap(nodes)
     boudaries = np.array()
     pai = np.array()
     # queueの中身がある限り
@@ -164,7 +165,7 @@ def plane(v):
     return pca.fit(v)
 
 # ヒープの作成
-def buildminmseheap(nodes):
+def build_mse_heap(nodes):
     # 1つずつmseを計算し直して並べ替える
     queue = sorted(nodes, key=mse)
     return queue
@@ -267,4 +268,3 @@ if __name__ == '__main__':
             pipeline.stop()
             cv2.destroyAllWindows()
             break
-        

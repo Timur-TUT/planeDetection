@@ -5,6 +5,7 @@ from collections import deque
 import math
 import cv2
 import numpy as np
+import random
 import pyrealsense2 as rs
 from sklearn.decomposition import PCA
 from sklearn.metrics import mean_squared_error
@@ -13,7 +14,8 @@ from sklearn.metrics import mean_squared_error
 # 入力は2次元になった
 def fast_plane_extraction(depth_image):
     # データ構造構築(ステップ1)
-    nodes, edges = initgraph(depth_image)
+    nodes, edges = init_graph(depth_image)
+
     # # 粗い平面検出(ステップ2)
     # boudaries, pai = ahcluster(nodes, edges)
     # # 粗い平面検出を精緻化(ステップ3)
@@ -24,7 +26,7 @@ def fast_plane_extraction(depth_image):
 # グループのクラス
 class Node:
     def __init__(self, data):
-        self.data = data    # np.array型の点群の集合(10×10)
+        self.data = data    # np.array型の深さの集合(10×10)
         self.group_num = 0 # グループの番号,初期値0
         self.rejected = False #reject_nodeに当てはまったかどうか
 
@@ -35,8 +37,9 @@ class Node:
         self.down = None
 
 # データ構造構築
-def initgraph(depth_image, h=10, w=10):
+def init_graph(depth_image, h=10, w=10):
     nodes = []
+    rejected_nodes = []
     edges = []
 
     # 10×10が横にいくつあるかの数
@@ -51,8 +54,16 @@ def initgraph(depth_image, h=10, w=10):
             # nodeの除去の判定
             if reject_node(node):
                 node.rejected = True
+                rejected_nodes.append(node)
             nodes_line.append(node)
         nodes.append(nodes_line)
+
+    print(f"rejectされていないノード数: {sum(len(v) for v in nodes) - len(rejected_nodes)}")
+    rand = random.randint(0, len(rejected_nodes))
+    print(f"rejectされたノードの例: {[node.data for node in rejected_nodes[rand:rand+1]]}")
+    print()
+    print("-------------------------------------------------------------------------------")
+    print()
 
     # 右・下の繋がりを調べる
     for i in range(len(nodes)):
@@ -67,42 +78,41 @@ def initgraph(depth_image, h=10, w=10):
                     nodes[i+1][j].up = nodes[i][j]
                     edges.append(nodes[i][j])
 
-    return nodes, edges
+    return nodes, list(set(edges))
 
 # ノードの除去
 def reject_node(node, threshold=999):
-    data = node.data
-    # データが欠落していたら    
+    data = node.data.astype(np.int32)
+    # データが欠落していたら
     if np.any(data == 0):
         return True
 
     # 周囲4点との差
-    v_diff = np.diff(data, axis=0)  #縦方向の差
-    h_diff = np.diff(data)          #横方向の差
+    v_diff = np.abs(np.diff(data, axis=0))  #縦方向の差
+    h_diff = np.abs(np.diff(data))          #横方向の差
 
     if v_diff.max() > threshold or h_diff.max() > threshold:
         return True
 
     # まだ決めていない
-    elif mse(data) > 999999:
+    if mse(data) > 999999:
         return True
 
-    else:
-        return False
+    return False
 
 # 連結関係の除去
 def rejectedge(node1, node2):
     # 欠落していなければ
     if np.any(node2.data == 0):
         return True 
+
     # 法線のなす角
-    # 一定値（まだ決めていない）
     outer = np.outer(node1.data, node2.data)
 
     if  np.any(outer > 999999):
         return True
-    else:
-        return False
+
+    return False
 
 # 平均二乗誤差の計算
 def mse(array):
@@ -171,6 +181,7 @@ def plane(v):
 # ヒープの作成
 def build_mse_heap(nodes):
     # 1つずつmseを計算し直して並べ替える
+    # クラスのメンバーとしてmseの値が必要？
     queue = sorted(nodes, key=mse)
     return queue
 

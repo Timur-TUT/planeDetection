@@ -15,6 +15,7 @@ from sklearn.metrics import mean_squared_error
 def fast_plane_extraction(depth_image):
     # データ構造構築(ステップ1)
     nodes, edges = init_graph(depth_image)
+    print(f"num of edges: {len(edges)}")
 
     # # 粗い平面検出(ステップ2)
     # boudaries, pai = ahcluster(nodes, edges)
@@ -29,6 +30,9 @@ class Node:
         self.data = data    # np.array型の深さの集合(10×10)
         self.group_num = 0 # グループの番号,初期値0
         self.rejected = False #reject_nodeに当てはまったかどうか
+        self.sz = np.sum(data)
+        self.szz = np.sum(data*data)
+        self.center = np.average(data)
 
         # 上下左右のノード
         self.left = None
@@ -58,12 +62,10 @@ def init_graph(depth_image, h=10, w=10):
             nodes_line.append(node)
         nodes.append(nodes_line)
 
-    print(f"rejectされていないノード数: {sum(len(v) for v in nodes) - len(rejected_nodes)}")
-    rand = random.randint(0, len(rejected_nodes))
-    print(f"rejectされたノードの例: {[node.data for node in rejected_nodes[rand:rand+1]]}")
-    print()
-    print("-------------------------------------------------------------------------------")
-    print()
+    # print(f"rejectされていないノード数: {sum(len(v) for v in nodes) - len(rejected_nodes)}")
+    # rand = random.randint(0, len(rejected_nodes))
+    # print(f"rejectされたノードの例: {[node.data for node in rejected_nodes[rand:rand+1]]}")
+    # print("-------------------------------------------------------------------------------")
 
     # 右・下の繋がりを調べる
     for i in range(len(nodes)):
@@ -106,21 +108,27 @@ def rejectedge(node1, node2):
     if np.any(node2.data == 0):
         return True 
 
-    # 法線のなす角
-    outer = np.outer(node1.data, node2.data)
+    normals = []
 
-    if  np.any(outer > 999999):
+    for data in [node1.data, node2.data]:
+        eig = np.linalg.eig(data)   # [0]: 固有値 shape(10, )      [1]: 固有ベクトル shape(10, 10)
+        normals.append(eig[1][:, np.argmin(eig[0])])    #虚数にminを使っていいのか？
+
+    # pfn = np.dot(normals[0], normals[1])
+    pfn = np.abs(np.sum(normals[0]*normals[1]))
+    
+    # print(f"pfn: {pfn}")
+    # print("-----------------------------------------------------------")
+
+    if  pfn <= 0.7:
         return True
 
     return False
 
 # 平均二乗誤差の計算
 def mse(array):
-    if np.any(array == 0):
-        return math.inf
-    else:
-        pca = PCA()
-        return mean_squared_error(array, pca.fit_transform(array))  #合ってるか不安
+    pca = PCA()
+    return mean_squared_error(array, pca.fit_transform(array))  #合ってるか不安
 
 # 粗い平面検出
 def ahcluster(nodes, edges):

@@ -22,7 +22,7 @@ def fast_plane_extraction(depth_image):
     # # 粗い平面検出を精緻化(ステップ3)
     # cluster, pro_pai = refine(boudaries, pai)
     # return cluster, pro_pai
-    return None, None
+    return nodes, None
 
 # グループのクラス
 class Node:
@@ -97,7 +97,7 @@ def reject_node(node, threshold=999):
         return True
 
     # まだ決めていない
-    if mse(data) > 999999:
+    if mse(data) > 9999999:
         return True
 
     return False
@@ -112,7 +112,7 @@ def rejectedge(node1, node2):
 
     for data in [node1.data, node2.data]:
         eig = np.linalg.eig(data)   # [0]: 固有値 shape(10, )      [1]: 固有ベクトル shape(10, 10)
-        normals.append(eig[1][:, np.argmin(eig[0])])    #虚数にminを使っていいのか？
+        normals.append(eig[1][:, np.argmin(eig[0])])
 
     # pfn = np.dot(normals[0], normals[1])
     pfn = np.abs(np.sum(normals[0]*normals[1]))
@@ -243,6 +243,26 @@ def refine(boundaries, pai):
     cluster, pro_pai = ahcluster(rf_nodes, rf_edges)
     return cluster, pro_pai
 
+def visualization(color_image, nodes):
+    color_image[::10] = [0, 0, 0]
+    color_image[:, ::10] = [0, 0, 0]
+    
+    for h in range(0, len(color_image), 10):
+        for w in range(0, len(color_image[0]), 10):
+            if nodes[h//10][w//10].rejected:
+                color_image[h+2:h+9, w+2:w+9] = [0, 0, 255]
+
+            if nodes[h//10][w//10].up:
+                color_image[h-5:h+5, w+5] = [102, 0, 255]
+            if nodes[h//10][w//10].down:
+                color_image[h+5:h+15, w+5] = [102, 0, 255]
+            if nodes[h//10][w//10].left:
+                color_image[h+5, w-5:w+5] = [102, 0, 255]
+            if nodes[h//10][w//10].right:
+                color_image[h+5, w+5:w+15] = [102, 0, 255]
+
+    return color_image
+
 if __name__ == '__main__':
     # Configure depth and color streams
     pipeline = rs.pipeline()
@@ -254,10 +274,12 @@ if __name__ == '__main__':
 
     # Start streaming
     pipeline.start(config)
+    align = rs.align(rs.stream.color)
 
     while True:
         # Wait for a coherent pair of frames: depth and color
         frames = pipeline.wait_for_frames()
+        frames = align.process(frames)
 
         depth_frame = frames.get_depth_frame()
         color_frame = frames.get_color_frame()
@@ -270,6 +292,8 @@ if __name__ == '__main__':
 
         cluster, pro_pai = fast_plane_extraction(depth_image)
 
+        color_image = visualization(color_image, cluster)
+
         # Apply colormap on depth image (image must be converted to 8-bit per pixel first)
         depth_scale = cv2.convertScaleAbs(depth_image, alpha=0.03)  #0～255の値にスケール変更している
 
@@ -277,6 +301,8 @@ if __name__ == '__main__':
 
         # Stack both images horizontally
         images = np.hstack((color_image, depth_colormap))
+
+        cv2.imwrite("debug_image.png", images)
 
         # Show images
         cv2.namedWindow('RealSense', cv2.WINDOW_AUTOSIZE)

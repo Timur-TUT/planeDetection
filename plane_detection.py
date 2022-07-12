@@ -5,7 +5,6 @@ from collections import deque
 import math
 import cv2
 import numpy as np
-import random
 import pyrealsense2 as rs
 from sklearn.decomposition import PCA
 from sklearn.metrics import mean_squared_error
@@ -30,9 +29,8 @@ class Node:
         self.data = data    # np.array型の深さの集合(10×10)
         self.group_num = 0 # グループの番号,初期値0
         self.rejected = False #reject_nodeに当てはまったかどうか
-        self.sz = np.sum(data)
-        self.szz = np.sum(data*data)
         self.center = np.average(data)
+        self.t_mse = (1.6e-6*self.center**2+5)**2
 
         # 上下左右のノード
         self.left = None
@@ -97,7 +95,7 @@ def reject_node(node, threshold=999):
         return True
 
     # まだ決めていない
-    if mse(data) > 9999999:
+    if mse(data) > node.t_mse:
         return True
 
     return False
@@ -116,7 +114,6 @@ def rejectedge(node1, node2):
 
     # pfn = np.dot(normals[0], normals[1])
     pfn = np.abs(np.sum(normals[0]*normals[1]))
-    
     # print(f"pfn: {pfn}")
     # print("-----------------------------------------------------------")
 
@@ -250,7 +247,7 @@ def visualization(color_image, nodes):
     for h in range(0, len(color_image), 10):
         for w in range(0, len(color_image[0]), 10):
             if nodes[h//10][w//10].rejected:
-                color_image[h+2:h+9, w+2:w+9] = [0, 0, 255]
+                color_image[h+4:h+7, w+4:w+7] = [0, 0, 255]
 
             if nodes[h//10][w//10].up:
                 color_image[h-5:h+5, w+5] = [102, 0, 255]

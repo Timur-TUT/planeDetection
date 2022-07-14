@@ -9,6 +9,9 @@ import pyrealsense2 as rs
 from sklearn.decomposition import PCA
 from sklearn.metrics import mean_squared_error
 
+# 面番号
+NUMBERS = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+
 # 処理の概形
 # 入力は2次元になった
 def fast_plane_extraction(depth_image):
@@ -27,7 +30,7 @@ def fast_plane_extraction(depth_image):
 class Node:
     def __init__(self, data):
         self.data = data    # np.array型の深さの集合(10×10)
-        self.group_num = 0 # グループの番号,初期値0
+        self.g_num = 0 # グループの番号,初期値0
         self.rejected = False #reject_nodeに当てはまったかどうか
         self.center = np.average(data)
         self.t_mse = (1.6e-6*self.center**2+5)**2
@@ -114,7 +117,7 @@ def rejectedge(node1, node2):
 
     # pfn = np.dot(normals[0], normals[1])
     pfn = np.abs(np.sum(normals[0]*normals[1]))
-    # print(f"pfn: {pfn}")
+    # print(f"pfn: {eig[0]}")
     # print("-----------------------------------------------------------")
 
     if  pfn <= 0.7:
@@ -125,58 +128,95 @@ def rejectedge(node1, node2):
 # 平均二乗誤差の計算
 def mse(array):
     pca = PCA()
-    return mean_squared_error(array, pca.fit_transform(array))  #合ってるか不安
+    if array.size == 1:
+        return math.inf
+    pca.fit(array)
+    # print(f"array: {array}")
+    # print(f"fit: {pca.components_}")
+    # print("-----------------------------------------------------------")
+    return mean_squared_error(array, pca.fit_transform(array))  # 合ってるか不安
 
 # 粗い平面検出
 def ahcluster(nodes, edges):
+
     # MSEの昇順のヒープを作る
-    queue = build_mse_heap(nodes)
+    # queue = build_mse_heap(nodes)
+    queue = edges
     boudaries = np.array()
     pai = np.array()
+
     # queueの中身がある限り
     while queue != []:
         suf = popmin(queue)
+
+        # 周りが同じ面ならばみない
+        if (suf.g_num == suf.left.g_num) and (suf.g_num == suf.right.g_num) and (suf.g_num == suf.up.g_num) and (suf.down.g_num):
+            continue
+
         # vがマージされているならば
+        """
         if suf not in nodes:
             continue
-        u_best = np.array()
-        u_merge = np.array()
+        """
+
+        # 面番号がなければ定義する
+        if suf.g_num == 0:
+            suf.g_num = NUMBERS.pop()
+
         # vと連結関係にあるuを取り出して
-        x_node, index = edges.catch(suf)
-        for cand in suf.links:
-            # 連結関係のノードをマージする
-            # 縦なら1行目,横なら2行目
-            u_test = np.append(u, v, axis=0)
-            u_test = np.append(u, v, axis=1)
-            # 一番MSEが小さいノードを選ぶ
-            if mse(u_test) < mse(u_merge):
-                # 連結しているノードの中で一番優秀なものをbest,くっつけた状態のものをmargeへ暫定的に
-                u_best = u
-                u_merge = u_test
+        # 連結関係のノードをマージする
+        suf_test = np.hstack[suf.left.data, suf.data]
+        suf_best = np.zeros(1)
+        suf_choice = None
+        # 一番MSEが小さいノードを選ぶ
+        if mse(suf_test) < mse(suf_best):
+                # 連結しているノードの中で一番優秀なものをbest,くっつけた状態のものをchoiceへ暫定的に
+                if suf.left.g_num == suf.g_num:
+                    continue
+                else:
+                    suf_best = suf_test
+                    suf_choice = suf.left
+
+        suf_test = np.hstack[suf.data, suf.right.data]
+
+        if mse(suf_test) < mse(suf_best):
+                # 連結しているノードの中で一番優秀なものをbest,くっつけた状態のものをchoiceへ暫定的に
+                if suf.right.g_num == suf.g_num:
+                    continue
+                else:
+                    suf_best = suf_test
+                    suf_choice = suf.right
+
+        suf_test = np.vstack[suf.up.data, suf.data]
+
+        if mse(suf_test) < mse(suf_best):
+                # 連結しているノードの中で一番優秀なものをbest,くっつけた状態のものをchoiceへ暫定的に
+                if suf.up.g_num == suf.g_num:
+                    continue
+                else:
+                    suf_best = suf_test
+                    suf_choice = suf.up
+        
+        suf_test = np.vstack[suf.data, suf.down.data]
+
+        if mse(suf_test) < mse(suf_best):
+                # 連結しているノードの中で一番優秀なものをbest,くっつけた状態のものをchoiceへ暫定的に
+                if suf.down.g_num == suf.g_num:
+                    continue
+                else:
+                    suf_best = suf_test
+                    suf_choice = suf.down
+
         # マージ失敗
-        if mse(u_merge) >= 2500:
-            # vの大きさが一定以上ならば
-            if abs(v) >= 100:
-                # 平面とみなす
-                boudaries = boudaries.append(v)
-                pai = pai.append(plane(v))
-                # 差集合
-                # 連結関係の部分を削除？
-                # uvの連結関係を追加
-                edges = edges.remove()
-                nodes = nodes.remove(v)
+        if mse(suf_best) >= 999999:
+                #boudaries = boudaries.append(suf)
+                pai = pai.append(plane(suf_best))
+
         # マージ成功
-        # マージ後のu_mergeをそれぞれに追加しvとu_bestをそれぞれ削除する
-        # エッジ収縮
         else:
-            queue.append(u_merge)
-            edges = edges.append()
-            edges = edges.remove(u_best)
-            edges = edges.remove(v)
-            nodes = nodes.append(u_merge)
-            nodes = nodes.remove(v)
-            nodes = nodes.remove(u_best)
-    return boudaries, pai
+                queue.append(suf)
+                suf_choice.g_num = suf.g_num
+    return pai
 
 # 平面近似PCA
 def plane(v):

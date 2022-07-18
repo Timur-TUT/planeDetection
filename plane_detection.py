@@ -5,6 +5,7 @@ from collections import deque
 import math
 import cv2
 import numpy as np
+import random
 import pyrealsense2 as rs
 from sklearn.decomposition import PCA
 from sklearn.metrics import mean_squared_error
@@ -14,10 +15,10 @@ NUMBERS = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
 
 # 処理の概形
 # 入力は2次元になった
-def fast_plane_extraction(depth_image):
+def fast_plane_extraction(verts):
     # データ構造構築(ステップ1)
-    nodes, edges = init_graph(depth_image)
-    print(f"num of edges: {len(edges)}")
+    nodes, edges = init_graph(verts)
+    # print(f"num of edges: {len(edges)}")
 
     # # 粗い平面検出(ステップ2)
     # boudaries, pai = ahcluster(nodes, edges)
@@ -42,20 +43,20 @@ class Node:
         self.down = None
 
 # データ構造構築
-def init_graph(depth_image, h=10, w=10):
+def init_graph(verts, h=10, w=10):
     nodes = []
     rejected_nodes = []
     edges = []
 
     # 10×10が横にいくつあるかの数
-    width = len(depth_image[0]) // w 
-    height = len(depth_image) // h
+    width = len(verts[0]) // w 
+    height = len(verts) // h
 
     for i in range(height):
         nodes_line = []
         for j in range(width):
             # node は論文の v
-            node = Node(depth_image[i*h:i*h+h,j*w:j*w+w])
+            node = Node(verts[i*h:i*h+h,j*w:j*w+w])
             # nodeの除去の判定
             if reject_node(node):
                 node.rejected = True
@@ -63,10 +64,10 @@ def init_graph(depth_image, h=10, w=10):
             nodes_line.append(node)
         nodes.append(nodes_line)
 
-    # print(f"rejectされていないノード数: {sum(len(v) for v in nodes) - len(rejected_nodes)}")
+    print(f"rejectされていないノード数: {sum(len(v) for v in nodes) - len(rejected_nodes)}")
     # rand = random.randint(0, len(rejected_nodes))
     # print(f"rejectされたノードの例: {[node.data for node in rejected_nodes[rand:rand+1]]}")
-    # print("-------------------------------------------------------------------------------")
+    print("-------------------------------------------------------------------------------")
 
     # 右・下の繋がりを調べる
     for i in range(len(nodes)):
@@ -84,44 +85,45 @@ def init_graph(depth_image, h=10, w=10):
     return nodes, list(set(edges))
 
 # ノードの除去
-def reject_node(node, threshold=999):
-    data = node.data.astype(np.int32)
+def reject_node(node, threshold=10.0):
+    data = node.data
+
     # データが欠落していたら
-    if np.any(data == 0):
+    if np.any(data[..., -1] == 0):
         return True
 
     # 周囲4点との差
-    v_diff = np.abs(np.diff(data, axis=0))  #縦方向の差
-    h_diff = np.abs(np.diff(data))          #横方向の差
+    v_diff = np.linalg.norm(data[:-1]-data[1:], axis=2)
+    h_diff = np.linalg.norm(data[:, :-1]-data[:, 1:], axis=2)
 
     if v_diff.max() > threshold or h_diff.max() > threshold:
         return True
 
-    # まだ決めていない
-    if mse(data) > node.t_mse:
-        return True
+    # # まだ決めていない
+    # if mse(data) > node.t_mse:
+    #     return True
 
     return False
 
 # 連結関係の除去
 def rejectedge(node1, node2):
     # 欠落していなければ
-    if np.any(node2.data == 0):
-        return True 
+    # if np.any(node2.data == 0):
+    #     return True 
 
-    normals = []
+    # normals = []
 
-    for data in [node1.data, node2.data]:
-        eig = np.linalg.eig(data)   # [0]: 固有値 shape(10, )      [1]: 固有ベクトル shape(10, 10)
-        normals.append(eig[1][:, np.argmin(eig[0])])
+    # for data in [node1.data, node2.data]:
+    #     eig = np.linalg.eig(data)   # [0]: 固有値 shape(10, )      [1]: 固有ベクトル shape(10, 10)
+    #     normals.append(eig[1][:, np.argmin(eig[0])])
 
-    # pfn = np.dot(normals[0], normals[1])
-    pfn = np.abs(np.sum(normals[0]*normals[1]))
-    # print(f"pfn: {eig[0]}")
-    # print("-----------------------------------------------------------")
+    # # pfn = np.dot(normals[0], normals[1])
+    # pfn = np.abs(np.sum(normals[0]*normals[1]))
+    # # print(f"pfn: {eig[0]}")
+    # # print("-----------------------------------------------------------")
 
-    if  pfn <= 0.7:
-        return True
+    # if  pfn <= 0.7:
+    #     return True
 
     return False
 
@@ -283,9 +285,10 @@ def refine(boundaries, pai):
 def visualization(color_image, nodes):
     color_image[::10] = [0, 0, 0]
     color_image[:, ::10] = [0, 0, 0]
+    print(len(color_image))
     
-    for h in range(0, len(color_image), 10):
-        for w in range(0, len(color_image[0]), 10):
+    for h in range(0, len(color_image)-10, 10):
+        for w in range(0, len(color_image[0])-10, 10):
             if nodes[h//10][w//10].rejected:
                 color_image[h+4:h+7, w+4:w+7] = [0, 0, 255]
 
@@ -312,6 +315,8 @@ if __name__ == '__main__':
     # Start streaming
     pipeline.start(config)
     align = rs.align(rs.stream.color)
+    
+    pc = rs.pointcloud()
 
     while True:
         # Wait for a coherent pair of frames: depth and color
@@ -327,9 +332,13 @@ if __name__ == '__main__':
         depth_image = np.asanyarray(depth_frame.get_data()) #計算に使用
         color_image = np.asanyarray(color_frame.get_data())
 
-        cluster, pro_pai = fast_plane_extraction(depth_image)
+        points = pc.calculate(depth_frame)
+        v = points.get_vertices()
+        verts = np.asanyarray(v).view(np.float32).reshape(640, 480, 3)  # xyz
 
-        color_image = visualization(color_image, cluster)
+        cluster, pro_pai = fast_plane_extraction(verts)
+
+        # color_image = visualization(color_image, cluster)
 
         # Apply colormap on depth image (image must be converted to 8-bit per pixel first)
         depth_scale = cv2.convertScaleAbs(depth_image, alpha=0.03)  #0～255の値にスケール変更している

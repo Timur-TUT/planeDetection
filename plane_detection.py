@@ -3,6 +3,7 @@
 
 from collections import deque
 import math
+from platform import node
 import cv2
 import numpy as np
 import pyrealsense2 as rs
@@ -144,15 +145,12 @@ def ahcluster(nodes, edges):
     queue = edges
     boudaries = np.array()
     pai = np.array()
+    suf_choice = None
+    suf_best = np.zeros(1)
 
     # queueの中身がある限り
     while queue != []:
         suf = popmin(queue)
-
-        # 周りが同じ面ならばみない
-        if (suf.g_num == suf.left.g_num) and (suf.g_num == suf.right.g_num) and (suf.g_num == suf.up.g_num) and (suf.down.g_num):
-            continue
-
         # vがマージされているならば
         """
         if suf not in nodes:
@@ -163,57 +161,68 @@ def ahcluster(nodes, edges):
         if suf.g_num == 0:
             suf.g_num = NUMBERS.pop()
 
-        # vと連結関係にあるuを取り出して
         # 連結関係のノードをマージする
-        suf_test = np.hstack[suf.left.data, suf.data]
-        suf_best = np.zeros(1)
-        suf_choice = None
+        try:
+            suf_test = np.hstack[suf.left.data, suf.data]
+        except:
+            pass
+
         # 一番MSEが小さいノードを選ぶ
         if mse(suf_test) < mse(suf_best):
-                # 連結しているノードの中で一番優秀なものをbest,くっつけた状態のものをchoiceへ暫定的に
-                if suf.left.g_num == suf.g_num:
-                    continue
-                else:
-                    suf_best = suf_test
-                    suf_choice = suf.left
+            # 連結しているノードの中で一番優秀なものをbest,くっつけた状態のものをchoiceへ暫定的に
+            if suf.left.g_num == suf.g_num:
+                pass
+            else:
+                suf_best = suf_test
+                suf_choice = suf.left
 
-        suf_test = np.hstack[suf.data, suf.right.data]
-
-        if mse(suf_test) < mse(suf_best):
-                # 連結しているノードの中で一番優秀なものをbest,くっつけた状態のものをchoiceへ暫定的に
-                if suf.right.g_num == suf.g_num:
-                    continue
-                else:
-                    suf_best = suf_test
-                    suf_choice = suf.right
-
-        suf_test = np.vstack[suf.up.data, suf.data]
+        try:
+            suf_test = np.hstack[suf.data, suf.right.data]
+        except:
+            pass
 
         if mse(suf_test) < mse(suf_best):
-                # 連結しているノードの中で一番優秀なものをbest,くっつけた状態のものをchoiceへ暫定的に
-                if suf.up.g_num == suf.g_num:
-                    continue
-                else:
-                    suf_best = suf_test
-                    suf_choice = suf.up
+            # 連結しているノードの中で一番優秀なものをbest,くっつけた状態のものをchoiceへ暫定的に
+            if suf.right.g_num == suf.g_num:
+                pass
+            else:
+                suf_best = suf_test
+                suf_choice = suf.right
+
+        try:
+            suf_test = np.vstack[suf.up.data, suf.data]
+        except:
+            pass
+
+        if mse(suf_test) < mse(suf_best):
+            # 連結しているノードの中で一番優秀なものをbest,くっつけた状態のものをchoiceへ暫定的に
+            if suf.up.g_num == suf.g_num:
+                pass
+            else:
+                suf_best = suf_test
+                suf_choice = suf.up
         
-        suf_test = np.vstack[suf.data, suf.down.data]
+        try:
+            suf_test = np.vstack[suf.data, suf.down.data]
+        except:
+            pass
 
         if mse(suf_test) < mse(suf_best):
-                # 連結しているノードの中で一番優秀なものをbest,くっつけた状態のものをchoiceへ暫定的に
-                if suf.down.g_num == suf.g_num:
-                    continue
-                else:
-                    suf_best = suf_test
-                    suf_choice = suf.down
+            # 連結しているノードの中で一番優秀なものをbest,くっつけた状態のものをchoiceへ暫定的に
+            if suf.down.g_num == suf.g_num:
+                pass
+            else:
+                suf_best = suf_test
+                suf_choice = suf.down
 
         # マージ失敗
         if mse(suf_best) >= 999999:
-                #boudaries = boudaries.append(suf)
-                pai = pai.append(plane(suf_best))
+            #boudaries = boudaries.append(suf)
+            pai = pai.append(plane(suf_best))
 
         # マージ成功
         else:
+            if not suf_choice != None:
                 queue.append(suf)
                 suf_choice.g_num = suf.g_num
     return pai
@@ -236,17 +245,18 @@ def popmin(queue):
     return choice
 
 # 粗い平面検出の精緻化
-# Bk,Rk,Rlは任意の順番のという意味かもしれない
-def refine(boundaries, pai):
-    # キュー
-    queue = deque()
+def refine(edges, pai):
+    queue = edges
     refine = np.array()
     rf_nodes = np.array()
     rf_edges = np.array()
-    for k, boundary in enumerate(boundaries):
-        refine_k = np.array()
-        # 謎ポイント
-        refine = refine.append(refine_k)
+    suf_num = 0
+
+    for node in edges:
+        suf_num = node.g_num
+        # 上下左右のノードと番号が違ったら境界
+        if (suf_num != node.left.g_num) or (suf_num != node.right.g_num) or (suf_num != node.up.g_num) or (suf_num != node.down.g_num):
+            
         # フチを除く
         for v in boundary:
             # 上下左右のノードが面内ではないならば

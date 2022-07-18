@@ -246,7 +246,7 @@ def popmin(queue):
 
 # 粗い平面検出の精緻化
 def refine(edges, pai):
-    queue = edges
+    queue = deque()
     refine = np.array()
     rf_nodes = np.array()
     rf_edges = np.array()
@@ -254,21 +254,23 @@ def refine(edges, pai):
 
     for node in edges:
         suf_num = node.g_num
-        # 上下左右のノードと番号が違ったら境界
-        if (suf_num != node.left.g_num) or (suf_num != node.right.g_num) or (suf_num != node.up.g_num) or (suf_num != node.down.g_num):
-            
-        # フチを除く
-        for v in boundary:
-            # 上下左右のノードが面内ではないならば
-            if v not in boundary:
-                # 境界点判定
-                boundary = boundary.remove(v)
-        # 除去した境界のポイントを個別でみる
-        for p in v:
-            # kとは何の値？→インデックス？pとのタプルで追加しろといっている？
-            queue.append({p, k})
-        if boundary != None:
-            rf_nodes = rf_nodes.appned(boundary)
+        # 何らかの面に属しているとき
+        if not suf_num == 0:
+            # 上下左右のノードと番号が違ったら境界
+            if (node.left == None) or (node.right == None) or (node.up == None) or (node.down == None):
+                queue.append(node)
+                continue
+            elif (suf_num != node.left.g_num) or (suf_num != node.right.g_num) or (suf_num != node.up.g_num) or (suf_num != node.down.g_num):
+                queue.append(node)
+
+    while queue != None:
+        points = queue.popleft()
+        for columns in points:
+            for i in range(10):
+                if math.dist(columns[i], pai) >= 9 + mse()
+
+    """
+    # 遺物
     while queue != None:
         points = queue.popleft()
         k = points[1]
@@ -289,6 +291,10 @@ def refine(edges, pai):
         boundary_k = boundary_k.append(refine_k)
     cluster, pro_pai = ahcluster(rf_nodes, rf_edges)
     return cluster, pro_pai
+    """
+    
+    # 仮
+    return pro_pai
 
 def visualization(color_image, nodes):
     color_image[::10] = [0, 0, 0]

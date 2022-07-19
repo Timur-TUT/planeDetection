@@ -33,8 +33,10 @@ class Node:
         self.data = data    # np.array型の深さの集合(10×10)
         self.g_num = 0 # グループの番号,初期値0
         self.rejected = False #reject_nodeに当てはまったかどうか
-        self.center = np.average(data)
-        self.t_mse = (1.6e-6*self.center**2+5)**2
+        self.center = [np.average(data[..., 0]), np.average(data[..., 1]), np.average(data[..., 2])]    # 平均(重心)
+        self.cov = np.cov(data[..., :2].reshape(100, 2).T, data[..., 2].reshape(100,), rowvar=True)     # 分散共分散行列
+        self.eig = np.linalg.eig(self.cov)   # [0]: 固有値 shape(10, )      [1]: 固有ベクトル shape(10, 10)
+        self.t_mse = (1.6e-6*self.center[2]**2+5)**2
 
         # 上下左右のノード
         self.left = None
@@ -93,8 +95,8 @@ def reject_node(node, threshold=10.0):
         return True
 
     # 周囲4点との差
-    v_diff = np.linalg.norm(data[:-1]-data[1:], axis=2)
-    h_diff = np.linalg.norm(data[:, :-1]-data[:, 1:], axis=2)
+    v_diff = np.linalg.norm(data[:-1] - data[1:], axis=2)
+    h_diff = np.linalg.norm(data[:, :-1] - data[:, 1:], axis=2)
 
     if v_diff.max() > threshold or h_diff.max() > threshold:
         return True

@@ -18,7 +18,6 @@ NUMBERS = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
 def fast_plane_extraction(verts):
     # データ構造構築(ステップ1)
     nodes, edges = init_graph(verts)
-    # print(f"num of edges: {len(edges)}")
 
     # # 粗い平面検出(ステップ2)
     # boudaries, pai = ahcluster(nodes, edges)
@@ -35,8 +34,17 @@ class Node:
         self.rejected = False #reject_nodeに当てはまったかどうか
         self.center = [np.average(data[..., 0]), np.average(data[..., 1]), np.average(data[..., 2])]    # 平均(重心)
         self.cov = np.cov(data[..., :2].reshape(100, 2).T, data[..., 2].reshape(100,), rowvar=True)     # 分散共分散行列
-        self.eig = np.linalg.eig(self.cov)   # [0]: 固有値 shape(10, )      [1]: 固有ベクトル shape(10, 10)
+
+        eig = np.linalg.eig(self.cov)   
+        ind = np.argmin(eig[0])
+        self.eigen_val = eig[0][ind]    # 最小の固有値
+        if eig[1][ind,0]*self.center[0] + eig[1][ind,1]*self.center[1] + eig[1][ind,2]*self.center[2] <= 0:
+            self.normal = eig[1][ind]  #固有ベクトル(法線)
+        else:
+            self.normal = -eig[1][ind]
+        
         self.t_mse = (1.6e-6*self.center[2]**2+5)**2
+        self.mse = self.eigen_val / data.size
 
         # 上下左右のノード
         self.left = None
@@ -66,11 +74,6 @@ def init_graph(verts, h=10, w=10):
             nodes_line.append(node)
         nodes.append(nodes_line)
 
-    print(f"rejectされていないノード数: {sum(len(v) for v in nodes) - len(rejected_nodes)}")
-    # rand = random.randint(0, len(rejected_nodes))
-    # print(f"rejectされたノードの例: {[node.data for node in rejected_nodes[rand:rand+1]]}")
-    print("-------------------------------------------------------------------------------")
-
     # 右・下の繋がりを調べる
     for i in range(len(nodes)):
         for j in range(len(nodes[0])):
@@ -84,10 +87,18 @@ def init_graph(verts, h=10, w=10):
                     nodes[i+1][j].up = nodes[i][j]
                     edges.append(nodes[i][j])
 
-    return nodes, list(set(edges))
+    edges = list(set(edges))
+    
+    print(f"rejectされていないノード数: {sum(len(v) for v in nodes) - len(rejected_nodes)}")
+    print(f"エッジ数: {len(edges)}")
+    # rand = random.randint(0, len(rejected_nodes))
+    # print(f"rejectされたノードの例: {[node.data for node in rejected_nodes[rand:rand+1]]}")
+    print("-------------------------------------------------------------------------------")
+
+    return nodes, edges
 
 # ノードの除去
-def reject_node(node, threshold=10.0):
+def reject_node(node, threshold=0.03):
     data = node.data
 
     # データが欠落していたら
@@ -101,31 +112,21 @@ def reject_node(node, threshold=10.0):
     if v_diff.max() > threshold or h_diff.max() > threshold:
         return True
 
-    # # まだ決めていない
-    # if mse(data) > node.t_mse:
-    #     return True
+    if node.mse > node.t_mse:   #ここではじかれるノードがない...
+        return True             #閾値が変かも
 
     return False
 
 # 連結関係の除去
 def rejectedge(node1, node2):
     # 欠落していなければ
-    # if np.any(node2.data == 0):
-    #     return True 
+    if np.any(node2.data[..., -1] == 0):
+        return True 
 
-    # normals = []
+    pfn = np.abs(np.dot(node1.normal, node2.normal))
 
-    # for data in [node1.data, node2.data]:
-    #     eig = np.linalg.eig(data)   # [0]: 固有値 shape(10, )      [1]: 固有ベクトル shape(10, 10)
-    #     normals.append(eig[1][:, np.argmin(eig[0])])
-
-    # # pfn = np.dot(normals[0], normals[1])
-    # pfn = np.abs(np.sum(normals[0]*normals[1]))
-    # # print(f"pfn: {eig[0]}")
-    # # print("-----------------------------------------------------------")
-
-    # if  pfn <= 0.7:
-    #     return True
+    if  pfn <= 0.7:
+        return True
 
     return False
 
@@ -287,10 +288,9 @@ def refine(boundaries, pai):
 def visualization(color_image, nodes):
     color_image[::10] = [0, 0, 0]
     color_image[:, ::10] = [0, 0, 0]
-    print(len(color_image))
     
-    for h in range(0, len(color_image)-10, 10):
-        for w in range(0, len(color_image[0])-10, 10):
+    for h in range(0, len(color_image), 10):
+        for w in range(0, len(color_image[0]), 10):
             if nodes[h//10][w//10].rejected:
                 color_image[h+4:h+7, w+4:w+7] = [0, 0, 255]
 
@@ -336,11 +336,11 @@ if __name__ == '__main__':
 
         points = pc.calculate(depth_frame)
         v = points.get_vertices()
-        verts = np.asanyarray(v).view(np.float32).reshape(640, 480, 3)  # xyz
+        verts = np.asanyarray(v).view(np.float32).reshape(480, 640, 3)  # xyz
 
         cluster, pro_pai = fast_plane_extraction(verts)
 
-        # color_image = visualization(color_image, cluster)
+        color_image = visualization(color_image, cluster)
 
         # Apply colormap on depth image (image must be converted to 8-bit per pixel first)
         depth_scale = cv2.convertScaleAbs(depth_image, alpha=0.03)  #0～255の値にスケール変更している
@@ -349,8 +349,6 @@ if __name__ == '__main__':
 
         # Stack both images horizontally
         images = np.hstack((color_image, depth_colormap))
-
-        cv2.imwrite("debug_image.png", images)
 
         # Show images
         cv2.namedWindow('RealSense', cv2.WINDOW_AUTOSIZE)

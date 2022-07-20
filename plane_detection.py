@@ -145,8 +145,7 @@ def mse(array):
 def ahcluster(nodes, edges):
 
     # MSEの昇順のヒープを作る
-    # queue = build_mse_heap(nodes)
-    queue = edges
+    queue = build_mse_heap(nodes)
     boudaries = np.array()
     pai = np.array()
 
@@ -231,8 +230,7 @@ def plane(v):
 # ヒープの作成
 def build_mse_heap(nodes):
     # 1つずつmseを計算し直して並べ替える
-    # クラスのメンバーとしてmseの値が必要？
-    queue = sorted(nodes, key=mse)
+    queue = sorted(nodes, key=lambda node: node.mse)
     return queue
 
 # 先頭を取り出す

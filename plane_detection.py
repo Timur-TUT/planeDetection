@@ -286,22 +286,26 @@ def refine(boundaries, pai):
     return cluster, pro_pai
 
 def visualization(color_image, nodes):
-    color_image[::10] = [0, 0, 0]
-    color_image[:, ::10] = [0, 0, 0]
+    BLACK = [0, 0, 0]
+    PINK = [102, 0, 255]
+    RED = [0, 0, 255]
+
+    color_image[::10] = BLACK
+    color_image[:, ::10] = BLACK    
     
     for h in range(0, len(color_image), 10):
         for w in range(0, len(color_image[0]), 10):
             if nodes[h//10][w//10].rejected:
-                color_image[h+4:h+7, w+4:w+7] = [0, 0, 255]
+                color_image[h+4:h+7, w+4:w+7] = RED
 
             if nodes[h//10][w//10].up:
-                color_image[h-5:h+5, w+5] = [102, 0, 255]
+                color_image[h-5:h+5, w+5] = PINK
             if nodes[h//10][w//10].down:
-                color_image[h+5:h+15, w+5] = [102, 0, 255]
+                color_image[h+5:h+15, w+5] = PINK
             if nodes[h//10][w//10].left:
-                color_image[h+5, w-5:w+5] = [102, 0, 255]
+                color_image[h+5, w-5:w+5] = PINK
             if nodes[h//10][w//10].right:
-                color_image[h+5, w+5:w+15] = [102, 0, 255]
+                color_image[h+5, w+5:w+15] = PINK
 
     return color_image
 
@@ -358,7 +362,7 @@ if __name__ == '__main__':
 
         if key == ord("s"):
             cv2.imwrite('./out.png', images)
-        if key == ord("q") or (key != -1) or (prop_val < 0):
+        if key == ord("q") or (prop_val < 0):
             # Stop streaming
             pipeline.stop()
             cv2.destroyAllWindows()

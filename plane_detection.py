@@ -6,12 +6,10 @@ import math
 import cv2
 import numpy as np
 import random
+import sys
 import pyrealsense2 as rs
 from sklearn.decomposition import PCA
 from sklearn.metrics import mean_squared_error
-
-# 面番号
-NUMBERS = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
 
 # Reject理由
 MISSING_DATA = 0
@@ -37,31 +35,51 @@ class Node:
         self.data = data    # np.array型の深さの集合(10×10)
         self.g_num = 0 # グループの番号,初期値0
         self.reject_type = None #Rejectされた理由　Noneの場合はされていない
-        self.center = [np.average(data[..., 0]), np.average(data[..., 1]), np.average(data[..., 2])]    # 平均(重心)
-        self.cov = np.cov(data[..., :2].reshape(100, 2).T, data[..., 2].reshape(100,), rowvar=True)     # 分散共分散行列
-
-        eig = np.linalg.eig(self.cov)   
-        ind = np.argmin(eig[0])
-        self.mse = eig[0][ind] * data.size    # 最小の固有値
-
-        if eig[1][ind,0]*self.center[0] + eig[1][ind,1]*self.center[1] + eig[1][ind,2]*self.center[2] <= 0:
-            self.normal = eig[1][ind]  #固有ベクトル(法線)
-        else:
-            self.normal = -eig[1][ind]
+        self.compute()
         
-        self.t_mse = (1.6e-6*self.center[2]**2+5)**2
+        # self.t_mse = (1.6e-6*self.center[2]**2+5)**2
 
         # 上下左右のノード
         self.left = None
         self.right = None
         self.up = None
         self.down = None
+        self.edge = []
+
+    def compute(self):
+        self.center = [np.average(self.data[..., 0]), np.average(self.data[..., 1]), np.average(self.data[..., 2])]    # 平均(重心)
+        self.cov = np.cov(self.data[..., :2].reshape(self.data.size//3, 2).T, self.data[..., 2].reshape(self.data.size//3,), rowvar=True)     # 分散共分散行列
+
+        eig = np.linalg.eig(self.cov)   
+        ind = np.argmin(eig[0])
+        self.mse = eig[0][ind] * self.data.size    # 最小の固有値
+
+        if eig[1][ind,0]*self.center[0] + eig[1][ind,1]*self.center[1] + eig[1][ind,2]*self.center[2] <= 0:
+            self.normal = eig[1][ind]  #固有ベクトル(法線)
+        else:
+            self.normal = -eig[1][ind]
+    
+    def push(self, node, success=False):
+        self.prev_data = np.copy(self.data)
+        self.data = np.concatenate([self.data, node.data])
+        self.compute()
+        if success:
+            self.edge.remove(node)
+            self.edge += node.edge
+            node.g_num = self.g_num
+
+    def undo(self):
+        self.data = np.copy(self.prev_data)
+        # self.compute()
 
 # データ構造構築
 def init_graph(verts, h=10, w=10):
+    global NUMBERS
     nodes = []
     rejected_nodes = []
     edges = []
+        
+    NUMBERS = list(range(1,10000))    # 面番号
 
     # 10×10が横にいくつあるかの数
     width = len(verts[0]) // w 
@@ -84,11 +102,19 @@ def init_graph(verts, h=10, w=10):
             if nodes[i][j].reject_type == None:
                 if j+1<len(nodes[0]) and not rejectedge(nodes[i][j], nodes[i][j+1]):
                     nodes[i][j].right = nodes[i][j+1]
+                    nodes[i][j].edge.append(nodes[i][j+1])
+
                     nodes[i][j+1].left = nodes[i][j]
+                    nodes[i][j+1].edge.append(nodes[i][j])
+
                     edges.append(nodes[i][j])
                 if i+1<len(nodes) and not rejectedge(nodes[i][j], nodes[i+1][j]):
                     nodes[i][j].down = nodes[i+1][j]
+                    nodes[i][j].edge.append(nodes[i+1][j])
+
                     nodes[i+1][j].up = nodes[i][j]
+                    nodes[i+1][j].edge.append(nodes[i][j])
+
                     edges.append(nodes[i][j])
 
     edges = list(set(edges))
@@ -120,7 +146,7 @@ def reject_node(node, threshold=0.1):
 
     # print(f"mse = {node.mse}    t = {node.t_mse}")
 
-    if node.mse > 0.01:   #ここではじかれるノードがない...
+    if node.mse > 0.01:   #閾値適当
         node.reject_type = BIG_MSE
         return True
 
@@ -154,83 +180,49 @@ def mse(array):
 def ahcluster(nodes, edges):
 
     # MSEの昇順のヒープを作る
-    queue = build_mse_heap(nodes)
+    queue = build_mse_heap(edges)
     boudaries = np.array([])
     pai = np.array([])
 
-    # # queueの中身がある限り
-    # while queue != []:
-    #     suf = popmin(queue)
+    # queueの中身がある限り
+    while queue != []:
+        suf = queue.pop()
 
-    #     # 周りが同じ面ならばみない
-    #     if (suf.g_num == suf.left.g_num) and (suf.g_num == suf.right.g_num) and (suf.g_num == suf.up.g_num) and (suf.down.g_num):
-    #         continue
+        # 周りが同じ面ならばみない
+        if (suf.left and suf.g_num == suf.left.g_num) and (suf.right and suf.g_num == suf.right.g_num) and (suf.up and suf.g_num == suf.up.g_num) and (suf.down and suf.g_num == suf.down.g_num):
+            continue
 
-    #     # vがマージされているならば
-    #     """
-    #     if suf not in nodes:
-    #         continue
-    #     """
+        # vがマージされているならば
+        """
+        if suf not in nodes:
+            continue
+        """
 
-    #     # 面番号がなければ定義する
-    #     if suf.g_num == 0:
-    #         suf.g_num = NUMBERS.pop()
+        # 面番号がなければ定義する
+        if suf.g_num == 0:
+            suf.g_num = NUMBERS.pop()
 
-    #     # vと連結関係にあるuを取り出して
-    #     # 連結関係のノードをマージする
-    #     suf_test = np.hstack[suf.left.data, suf.data]
-    #     suf_best = np.zeros(1)
-    #     suf_choice = None
-    #     # 一番MSEが小さいノードを選ぶ
-    #     if mse(suf_test) < mse(suf_best):
-    #             # 連結しているノードの中で一番優秀なものをbest,くっつけた状態のものをchoiceへ暫定的に
-    #             if suf.left.g_num == suf.g_num:
-    #                 continue
-    #             else:
-    #                 suf_best = suf_test
-    #                 suf_choice = suf.left
+        # vと連結関係にあるuを取り出して
+        # 連結関係のノードをマージする
+        best_mse = [math.inf, None]
+        for edg in suf.edge:
+            suf.push(edg)
+            if suf.mse < best_mse[0]:
+                best_mse = [suf.mse, edg]
+            suf.undo()
 
-    #     suf_test = np.hstack[suf.data, suf.right.data]
+        # マージ失敗
+        if best_mse[0] >= 0.001:
+            continue
+            boudaries = boudaries.append(suf)
+            pai = pai.append(plane(suf_best))
 
-    #     if mse(suf_test) < mse(suf_best):
-    #             # 連結しているノードの中で一番優秀なものをbest,くっつけた状態のものをchoiceへ暫定的に
-    #             if suf.right.g_num == suf.g_num:
-    #                 continue
-    #             else:
-    #                 suf_best = suf_test
-    #                 suf_choice = suf.right
-
-    #     suf_test = np.vstack[suf.up.data, suf.data]
-
-    #     if mse(suf_test) < mse(suf_best):
-    #             # 連結しているノードの中で一番優秀なものをbest,くっつけた状態のものをchoiceへ暫定的に
-    #             if suf.up.g_num == suf.g_num:
-    #                 continue
-    #             else:
-    #                 suf_best = suf_test
-    #                 suf_choice = suf.up
-        
-    #     suf_test = np.vstack[suf.data, suf.down.data]
-
-    #     if mse(suf_test) < mse(suf_best):
-    #             # 連結しているノードの中で一番優秀なものをbest,くっつけた状態のものをchoiceへ暫定的に
-    #             if suf.down.g_num == suf.g_num:
-    #                 continue
-    #             else:
-    #                 suf_best = suf_test
-    #                 suf_choice = suf.down
-
-    #     # マージ失敗
-    #     if mse(suf_best) >= 999999:
-    #             #boudaries = boudaries.append(suf)
-    #             pai = pai.append(plane(suf_best))
-
-    #     # マージ成功
-    #     else:
-    #             queue.append(suf)
-    #             suf_choice.g_num = suf.g_num
-    # return pai
-    return None, None
+        # マージ成功
+        else:
+            suf.push(best_mse[1], True)
+            queue.append(suf)
+            # suf_choice.g_num = suf.g_num
+    return boudaries, pai
 
 # 平面近似PCA
 def plane(v):
@@ -238,9 +230,9 @@ def plane(v):
     return pca.fit(v)
 
 # ヒープの作成
-def build_mse_heap(nodes):
-    # 1つずつmseを計算し直して並べ替える
-    queue = sorted(sum(nodes, []), key=lambda node: node.mse)
+def build_mse_heap(edges):
+    # 1つずつmseを計算し直して並べ替える)
+    queue = sorted(edges, key=lambda node: node.mse)
     print(queue[len(queue)//2].mse)
     print(queue[10].mse)
     print(queue[-1].mse)
@@ -319,14 +311,17 @@ def visualization(color_image, nodes):
             elif nodes[h//10][w//10].reject_type == BIG_MSE:
                 color_image[h+4:h+7, w+4:w+7] = RED
 
-            if nodes[h//10][w//10].up:
-                color_image[h-5:h+5, w+5] = PURPLE
-            if nodes[h//10][w//10].down:
-                color_image[h+5:h+15, w+5] = PURPLE
-            if nodes[h//10][w//10].left:
-                color_image[h+5, w-5:w+5] = PURPLE
-            if nodes[h//10][w//10].right:
-                color_image[h+5, w+5:w+15] = PURPLE
+            # if nodes[h//10][w//10].up:
+            #     color_image[h-5:h+5, w+5] = PURPLE
+            # if nodes[h//10][w//10].down:
+            #     color_image[h+5:h+15, w+5] = PURPLE
+            # if nodes[h//10][w//10].left:
+            #     color_image[h+5, w-5:w+5] = PURPLE
+            # if nodes[h//10][w//10].right:
+            #     color_image[h+5, w+5:w+15] = PURPLE
+
+            if nodes[h//10][w//10].g_num != 0:
+                color_image[h+1:h+10, w+1:w+10] = [nodes[h//10][w//10].g_num+100]
 
     return color_image
 

@@ -5,6 +5,7 @@ from collections import deque
 import math
 import cv2
 import numpy as np
+import scipy.io
 import random
 import sys
 import pyrealsense2 as rs
@@ -15,6 +16,8 @@ from sklearn.metrics import mean_squared_error
 MISSING_DATA = 0
 BIG_DIFF = 1
 BIG_MSE = 2
+
+REAL_TIME = False
 
 # 処理の概形\
 # 入力は2次元になった
@@ -32,7 +35,7 @@ def fast_plane_extraction(verts):
 # グループのクラス
 class Node:
     def __init__(self, data):
-        self.data = data    # np.array型の深さの集合(10×10)
+        self.data = np.nan_to_num(data)    # np.array型の深さの集合(10×10)
         self.g_num = 0 # グループの番号,初期値0
         self.reject_type = None #Rejectされた理由　Noneの場合はされていない
         self.compute()
@@ -121,14 +124,15 @@ def init_graph(verts, h=10, w=10):
     
     print(f"rejectされていないノード数: {sum(len(v) for v in nodes) - len(rejected_nodes)}")
     print(f"エッジ数: {len(edges)}")
-    # rand = random.randint(0, len(rejected_nodes))
+    rand = random.randint(0, len(rejected_nodes))
     # print(f"rejectされたノードの例: {[node.data for node in rejected_nodes[rand:rand+1]]}")
-    print("-------------------------------------------------------------------------------")
+    # print(f"reject理由: {[node.reject_type for node in rejected_nodes[rand:rand+1]]}")
+    # print("-------------------------------------------------------------------------------")
 
     return nodes, edges
 
 # ノードの除去
-def reject_node(node, threshold=0.1):
+def reject_node(node, threshold=100):
     data = node.data
 
     # データが欠落していたら
@@ -146,7 +150,7 @@ def reject_node(node, threshold=0.1):
 
     # print(f"mse = {node.mse}    t = {node.t_mse}")
 
-    if node.mse > 0.01:   #閾値適当
+    if node.mse > 2000:   #閾値適当
         node.reject_type = BIG_MSE
         return True
 
@@ -311,75 +315,92 @@ def visualization(color_image, nodes):
             elif nodes[h//10][w//10].reject_type == BIG_MSE:
                 color_image[h+4:h+7, w+4:w+7] = RED
 
-            # if nodes[h//10][w//10].up:
-            #     color_image[h-5:h+5, w+5] = PURPLE
-            # if nodes[h//10][w//10].down:
-            #     color_image[h+5:h+15, w+5] = PURPLE
-            # if nodes[h//10][w//10].left:
-            #     color_image[h+5, w-5:w+5] = PURPLE
-            # if nodes[h//10][w//10].right:
-            #     color_image[h+5, w+5:w+15] = PURPLE
+            if nodes[h//10][w//10].up:
+                color_image[h-5:h+5, w+5] = PURPLE
+            if nodes[h//10][w//10].down:
+                color_image[h+5:h+15, w+5] = PURPLE
+            if nodes[h//10][w//10].left:
+                color_image[h+5, w-5:w+5] = PURPLE
+            if nodes[h//10][w//10].right:
+                color_image[h+5, w+5:w+15] = PURPLE
 
-            if nodes[h//10][w//10].g_num != 0:
-                color_image[h+1:h+10, w+1:w+10] = [nodes[h//10][w//10].g_num+100]
+            # if nodes[h//10][w//10].g_num != 0:
+            #     color_image[h+1:h+10, w+1:w+10] = [nodes[h//10][w//10].g_num+100]
 
     return color_image
 
 if __name__ == '__main__':
-    # Configure depth and color streams
-    pipeline = rs.pipeline()
-    config = rs.config()
-
-    # Convert images to numpy arrays
-    config.enable_stream(rs.stream.depth, 640, 480, rs.format.z16, 30)
-    config.enable_stream(rs.stream.color, 640, 480, rs.format.bgr8, 30)
-
-    # Start streaming
-    pipeline.start(config)
-    align = rs.align(rs.stream.color)
-    
-    pc = rs.pointcloud()
-
-    while True:
-        # Wait for a coherent pair of frames: depth and color
-        frames = pipeline.wait_for_frames()
-        frames = align.process(frames)
-
-        depth_frame = frames.get_depth_frame()
-        color_frame = frames.get_color_frame()
-        if not depth_frame or not color_frame:
-            continue
-
-        # Convert images to numpy arrays
-        depth_image = np.asanyarray(depth_frame.get_data()) #計算に使用
-        color_image = np.asanyarray(color_frame.get_data())
-
-        points = pc.calculate(depth_frame)
-        v = points.get_vertices()
-        verts = np.asanyarray(v).view(np.float32).reshape(480, 640, 3)  # xyz
+    if not REAL_TIME:
+        data = scipy.io.loadmat('frame.mat')["frame"]
+        verts = data[0, 0][0]
+        color_image = data[0, 0][1]
 
         cluster, pro_pai = fast_plane_extraction(verts)
 
         color_image = visualization(color_image, cluster)
 
-        # Apply colormap on depth image (image must be converted to 8-bit per pixel first)
-        depth_scale = cv2.convertScaleAbs(depth_image, alpha=0.03)  #0～255の値にスケール変更している
-
-        depth_colormap = cv2.applyColorMap(depth_scale, cv2.COLORMAP_JET)
-
-        # Stack both images horizontally
-        images = np.hstack((color_image, depth_colormap))
-
-        # Show images
         cv2.namedWindow('RealSense', cv2.WINDOW_AUTOSIZE)
-        cv2.imshow('RealSense', images)
-        key = cv2.waitKey(1)
-        prop_val = cv2.getWindowProperty('RealSense', cv2.WND_PROP_ASPECT_RATIO)
-
+        cv2.imshow('RealSense', color_image)
+        key = cv2.waitKey(0)
         if key == ord("s"):
-            cv2.imwrite('./out.png', images)
-        if key == ord("q") or (prop_val < 0):
-            # Stop streaming
-            pipeline.stop()
-            cv2.destroyAllWindows()
-            break
+                cv2.imwrite('./out_nr.png', color_image)
+        cv2.destroyAllWindows()
+    
+    else:
+        # Configure depth and color streams
+        pipeline = rs.pipeline()
+        config = rs.config()
+
+        # Convert images to numpy arrays
+        config.enable_stream(rs.stream.depth, 640, 480, rs.format.z16, 30)
+        config.enable_stream(rs.stream.color, 640, 480, rs.format.bgr8, 30)
+
+        # Start streaming
+        pipeline.start(config)
+        align = rs.align(rs.stream.color)
+        
+        pc = rs.pointcloud()
+
+        while True:
+            # Wait for a coherent pair of frames: depth and color
+            frames = pipeline.wait_for_frames()
+            frames = align.process(frames)
+
+            depth_frame = frames.get_depth_frame()
+            color_frame = frames.get_color_frame()
+            if not depth_frame or not color_frame:
+                continue
+
+            # Convert images to numpy arrays
+            depth_image = np.asanyarray(depth_frame.get_data()) #計算に使用
+            color_image = np.asanyarray(color_frame.get_data())
+
+            points = pc.calculate(depth_frame)
+            v = points.get_vertices()
+            verts = np.asanyarray(v).view(np.float32).reshape(480, 640, 3)  # xyz
+
+            cluster, pro_pai = fast_plane_extraction(verts)
+
+            color_image = visualization(color_image, cluster)
+
+            # Apply colormap on depth image (image must be converted to 8-bit per pixel first)
+            depth_scale = cv2.convertScaleAbs(depth_image, alpha=0.03)  #0～255の値にスケール変更している
+
+            depth_colormap = cv2.applyColorMap(depth_scale, cv2.COLORMAP_JET)
+
+            # Stack both images horizontally
+            images = np.hstack((color_image, depth_colormap))
+
+            # Show images
+            cv2.namedWindow('RealSense', cv2.WINDOW_AUTOSIZE)
+            cv2.imshow('RealSense', images)
+            key = cv2.waitKey(1)
+            prop_val = cv2.getWindowProperty('RealSense', cv2.WND_PROP_ASPECT_RATIO)
+
+            if key == ord("s"):
+                cv2.imwrite('./out.png', images)
+            if key == ord("q") or (prop_val < 0):
+                # Stop streaming
+                pipeline.stop()
+                cv2.destroyAllWindows()
+                break

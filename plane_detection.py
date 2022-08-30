@@ -1,8 +1,11 @@
 # @author Timur
 # @author Yasu
 
+from ast import Num
 from collections import deque
 import math
+import queue
+from xml.dom.minicompat import NodeList
 import cv2
 import numpy as np
 import scipy.io
@@ -74,6 +77,7 @@ class Node:
     def undo(self):
         self.data = np.copy(self.prev_data)
         # self.compute()
+
 
 # データ構造構築
 def init_graph(verts, h=10, w=10):
@@ -224,6 +228,11 @@ def ahcluster(nodes, edges):
         # マージ成功
         else:
             suf.push(best_mse[1], True)
+            """
+            # くっつけた相手の情報をqueueから消して、dataをくっつけた状態にした方が速い？
+            queue.remove(best_mse[1])
+            best_mse[1].push(suf, True)
+            """
             queue.append(suf)
             # suf_choice.g_num = suf.g_num
     return boudaries, pai
@@ -248,32 +257,15 @@ def popmin(queue):
     return choice
 
 # 粗い平面検出の精緻化
-# Bk,Rk,Rlは任意の順番のという意味かもしれない
 def refine(boundaries, pai):
-    # キュー
-    queue = deque()
-    refine = np.array()
-    rf_nodes = np.array()
-    rf_edges = np.array()
-    for k, boundary in enumerate(boundaries):
-        refine_k = np.array()
-        # 謎ポイント
-        refine = refine.append(refine_k)
-        # フチを除く
-        for v in boundary:
-            # 上下左右のノードが面内ではないならば
-            if v not in boundary:
-                # 境界点判定
-                boundary = boundary.remove(v)
-        # 除去した境界のポイントを個別でみる
-        for p in v:
-            # kとは何の値？→インデックス？pとのタプルで追加しろといっている？
-            queue.append({p, k})
-        if boundary != None:
-            rf_nodes = rf_nodes.appned(boundary)
+    # 境界面のpointのみを集める
+    queue = build_boud_heap(boundaries)
     while queue != None:
-        points = queue.popleft()
-        k = points[1]
+        point = queue.popleft()
+        # やりたいことだけを書く(理想)
+        # pointの上下左右をみたい ← クラス化？
+        check_ref_points(point, boundaries, queue)
+
         for p in points[0]:
             if (p in boundary) or (p in refine_k) or (math.dist(p, pai[k]) >= 9 * mse(boundary[k])):
                 continue
@@ -291,6 +283,78 @@ def refine(boundaries, pai):
         boundary_k = boundary_k.append(refine_k)
     cluster, pro_pai = ahcluster(rf_nodes, rf_edges)
     return cluster, pro_pai
+
+def build_boud_heap(nodes):
+    queue = deque()
+    # 上下左右のどれか一つでも隣接するものが無ければ平面から除去
+    for node in nodes:
+        if (node.left == None) or (node.right == None) or (node.up == None) or (node.down == None):
+            node.g_num = 0
+    # 除去した上で平面境界nodeをpointまで分割してqueueに追加
+    for node in nodes:
+        num = node.g_num 
+        # 面に属していて
+        if num != 0:
+            # 境界ならば
+            if (node.left.g_num != num) or (node.right.g_num != num) or (node.up.g_num != num) or (node.down.g_num != num):
+                # pointまで分割したもののqueueを作る
+                for point in node.data: # ←初期の10×10のポイントが欲しい(現状だとマージ後の大きさになっている？)
+                    queue.append(point)
+    return queue
+
+# pointクラスがあること前提
+def check_ref_points(point, nodes, queue):
+    ref_edges = []
+    count = 0
+    # 左右上下の順で取り出す
+    adj = point.left
+    if adj != None:
+        meke_refine(adj, point, nodes, queue, 1)
+        
+        # 同じnode内か
+        if adj.node == point.node:
+            continue
+        # node(k)平面との距離がnode(k)平面のMSEの9倍以上か
+        elif (abs(adj.coordinate - nodes[point.node].center) >= nodes[point.node].mse*9) :
+            continue
+        # 同じ平面内か
+        if adj.g_num == point.g_num:
+            continue
+        # そもそも平面に属していない場合
+        elif adj.g_num == 0:
+            append_refine(adj, point)
+            queue.aapend(adj)
+        # 違う平面だった場合
+        else:
+            adj_node = nodes[adj.node]
+            point_node = nodes[point.node]
+            # 中心からの距離を
+            make_edges(adj, point, queue, adj_node.center, point_node.center)
+
+    return True
+
+def make_adj
+
+# 平面に属していないpointを平面に追加する
+def append_refine(adj, point):
+    # 同じ平面とみなす
+    adj.g_num = point.g_num
+    # nodeに追加する(10×10じゃなくなるが)
+    # やり方要相談
+    return True
+
+# 違う平面に属していた場合
+def  make_edges(adj, point, queue, adj_center, point_center):
+    adj_dis = abs(adj.coordinate - adj_center)
+    point_dis = abs(adj.coordinate - point_center)
+    # 面からの中心距離がpointの属するnodeの方が近いならば
+    if adj_dis > point_dis:
+        # 同じ平面とみなす
+        adj.g_num = point.num
+        # nodeの所属を変更する(削除して追加する)
+        # やり方要相談
+        queue.append(adj)
+    return True
 
 def visualization(color_image, nodes):
     color_image = np.copy(color_image)

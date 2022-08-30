@@ -4,6 +4,7 @@
 from ast import Num
 from collections import deque
 import math
+from operator import truediv
 import queue
 from xml.dom.minicompat import NodeList
 import cv2
@@ -264,24 +265,10 @@ def refine(boundaries, pai):
         point = queue.popleft()
         # やりたいことだけを書く(理想)
         # pointの上下左右をみたい ← クラス化？
-        check_ref_points(point, boundaries, queue)
-
-        for p in points[0]:
-            if (p in boundary) or (p in refine_k) or (math.dist(p, pai[k]) >= 9 * mse(boundary[k])):
-                continue
-            # lが存在するならば？l=k+1？
-            if (k+1 <= len(boundaries)) or (p in refine):
-                rf_edges = rf_edges.append({boundary_k,boundary_l})
-                if math.dist(p, pai[k]) < math.dist(p, pai[k+1]):
-                    refine_l = refine_l.remove(p)
-                    refine_k = refine_k.append(p)
-            else:
-                refine_k = refine_k.append(p)
-                queue.append({p, k})
-                # enqueue
-    for refine_k in refine:
-        boundary_k = boundary_k.append(refine_k)
-    cluster, pro_pai = ahcluster(rf_nodes, rf_edges)
+        ref_edges = check_ref_points(point, boundaries, queue)
+        ref_edges = list(set(ref_edges))
+    cluster, pro_pai = ahcluster(boundaries, ref_edges)
+    
     return cluster, pro_pai
 
 def build_boud_heap(nodes):
@@ -305,35 +292,67 @@ def build_boud_heap(nodes):
 # pointクラスがあること前提
 def check_ref_points(point, nodes, queue):
     ref_edges = []
-    count = 0
     # 左右上下の順で取り出す
     adj = point.left
     if adj != None:
-        meke_refine(adj, point, nodes, queue, 1)
-        
-        # 同じnode内か
-        if adj.node == point.node:
-            continue
-        # node(k)平面との距離がnode(k)平面のMSEの9倍以上か
-        elif (abs(adj.coordinate - nodes[point.node].center) >= nodes[point.node].mse*9) :
-            continue
-        # 同じ平面内か
-        if adj.g_num == point.g_num:
-            continue
-        # そもそも平面に属していない場合
-        elif adj.g_num == 0:
-            append_refine(adj, point)
-            queue.aapend(adj)
-        # 違う平面だった場合
-        else:
-            adj_node = nodes[adj.node]
-            point_node = nodes[point.node]
-            # 中心からの距離を
-            make_edges(adj, point, queue, adj_node.center, point_node.center)
+        make_refine(adj, point, nodes, queue, ref_edges, 0)
 
-    return True
+    adj = point.right
+    if adj != None:
+        make_refine(adj, point, nodes, queue, ref_edges, 1)
+    
+    adj = point.up
+    if adj != None:
+        make_refine(adj, point, nodes, queue, ref_edges, 2)
+    
+    adj = point.down
+    if adj != None:
+        make_refine(adj, point, nodes, queue, ref_edges, 3)
+    
+    return ref_edges
 
-def make_adj
+def make_refine(adj, point, nodes, queue, ref_edges, direction):
+    # 同じnode内か
+    if adj.node == point.node:
+        return True
+    # node(k)平面との距離がnode(k)平面のMSEの9倍以上か
+    elif (abs(adj.coordinate - nodes[point.node].center) >= nodes[point.node].mse*9) :
+        return True
+    # 同じ平面内か
+    if adj.g_num == point.g_num:
+        return True
+    # そもそも平面に属していない場合
+    elif adj.g_num == 0:
+        append_refine(adj, point)
+        queue.append(adj)
+        return True
+    # 違う平面だった場合
+    else:
+        adj_node = nodes[adj.node]
+        point_node = nodes[point.node]
+        make_edges(adj, point, queue, adj_node.center, point_node.center)
+        # 連結情報を追加する
+        if direction == 0:
+            point_node.left = adj_node
+            adj_node.right = point_node
+        elif direction == 1:
+            point_node.right = adj_node
+            adj_node.left = point_node
+        elif direction == 2:
+            point_node.up = adj_node
+            adj_node.down = point_node
+        elif direction == 3:
+            point_node.down = adj_node
+            adj_node.up = point_node
+        # edgeに含まれていなかったら追加する
+        # 片方の確認のみで大丈夫なはず 
+        if adj_node not in point_node.edge:
+            point_node.edge.append(adj_node)
+            adj_node.edge.append(point_node)
+        # ref_edgesに追加する    
+        ref_edges.append(adj_node)
+        ref_edges.append(point_node)
+        return True
 
 # 平面に属していないpointを平面に追加する
 def append_refine(adj, point):

@@ -53,6 +53,12 @@ class Node:
         self.down = None
         self.edge = []
 
+# ポイントのクラス(仮)
+class Point:
+    def __init__(self):
+        self.g_num = 0
+        self.node = None
+
     def compute(self):
         self.center = [np.average(self.data[..., 0]), np.average(self.data[..., 1]), np.average(self.data[..., 2])]    # 平均(重心)
         self.cov = np.cov(self.data[..., :2].reshape(self.data.size//3, 2).T, self.data[..., 2].reshape(self.data.size//3,), rowvar=True)     # 分散共分散行列

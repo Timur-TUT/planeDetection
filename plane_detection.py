@@ -11,43 +11,52 @@ import sys
 import pyrealsense2 as rs
 from sklearn.decomposition import PCA
 from sklearn.metrics import mean_squared_error
+from functools import singledispatch
 
-# Reject理由
-MISSING_DATA = 0
-BIG_DIFF = 1
-BIG_MSE = 2
+# Nodeのタイプ
+TYPE_NORMAL = 0
+TYPE_MISSING_DATA = 1
+TYPE_DEPTH_DISCONTINUE = 2
+TYPE_BIG_MSE = 3
 
 REAL_TIME = False
+sys.setrecursionlimit(10000) 
 
 # 処理の概形\
 # 入力は2次元になった
 def fast_plane_extraction(verts):
+    global NODES
     # データ構造構築(ステップ1)
-    nodes, edges = init_graph(verts)
+    NODES, edges = init_graph(verts)
 
     # 粗い平面検出(ステップ2)
-    boudaries, pai = ahcluster(nodes, edges)
+    boudaries, pai = ahcluster(NODES, edges)
     # # 粗い平面検出を精緻化(ステップ3)
     # cluster, pro_pai = refine(boudaries, pai)
     # return cluster, pro_pai
-    return nodes, None
+    return NODES, None
 
-# グループのクラス
+# Nodeのクラス
 class Node:
-    def __init__(self, data):
-        self.data = np.nan_to_num(data)    # np.array型の深さの集合(10×10)
-        self.g_num = 0 # グループの番号,初期値0
-        self.reject_type = None #Rejectされた理由　Noneの場合はされていない
-        self.compute()
-        
-        # self.t_mse = (1.6e-6*self.center[2]**2+5)**2
+    def __init__(self, data, index):        #data: 点群の配列   ind: Nodeの座標
+        self.data = np.nan_to_num(data)     # 点群の配列　np.array型(10×10)
+        self.g_num = 0                      # グループの番号,初期値0
+        self.node_type = TYPE_NORMAL        # Nodeのタイプ
+        self.ind = index                    # 左上からの座標
 
-        # 上下左右のノード
+        # つながりがある上下左右のNode
         self.left = None
         self.right = None
         self.up = None
         self.down = None
-        self.edge = []
+        self.edges = []
+
+    def set_params(self, phase):   # 閾値定義
+        if phase == 0:
+            self.t_mse = (1.6e-6*self.center[2]**2+5)**2
+        else:
+            self.t_mse = (1.6e-6*self.center[2]**2+8)**2
+        self.t_mse = 15
 
     def compute(self):
         self.center = [np.average(self.data[..., 0]), np.average(self.data[..., 1]), np.average(self.data[..., 2])]    # 平均(重心)
@@ -55,35 +64,61 @@ class Node:
 
         eig = np.linalg.eig(self.cov)   
         ind = np.argmin(eig[0])
-        self.mse = eig[0][ind] * self.data.size    # 最小の固有値
+        self.mse = eig[0][ind]  # 最小の固有値
 
         if eig[1][ind,0]*self.center[0] + eig[1][ind,1]*self.center[1] + eig[1][ind,2]*self.center[2] <= 0:
             self.normal = eig[1][ind]  #固有ベクトル(法線)
         else:
             self.normal = -eig[1][ind]
-    
-    def push(self, node, success=False):
-        self.prev_data = np.copy(self.data)
-        self.data = np.concatenate([self.data, node.data])
-        self.compute()
-        if success:
-            self.edge.remove(node)
-            self.edge += node.edge
-            node.g_num = self.g_num
 
-    def undo(self):
-        self.data = np.copy(self.prev_data)
-        # self.compute()
+    def calculate_pf_mse(self, data):
+        cov = np.cov(data[..., :2].reshape(data.size//3, 2).T, data[..., 2].reshape(data.size//3,), rowvar=True)     # 分散共分散行列
+
+        eig = np.linalg.eig(cov)   
+        ind = np.argmin(eig[0])
+        mse = eig[0][ind]  # 最小の固有値
+
+        return mse
+
+class Plane(Node):
+    def __init__(self, node_a, node_b):
+        self.data = np.concatenate([node_a.data, node_b.data])
+        self.nodes = [node_a, node_b]
+        self.g_num = node_a.g_num = node_b.g_num =  NUMBERS.pop(0)
+        self.add_edges(node_a, node_b)
+        self.compute()
+
+    def add_edges(self, node_a, node_b):
+        self.edges = list(set(node_a.edges + node_b.edges))
+        for rm in self.nodes:
+            if rm in self.edges:
+                self.edges.remove(rm)
+
+    def push(self, new_node):
+        self.data = np.concatenate([self.data, new_node.data])
+        self.nodes.append(new_node)
+        new_node.g_num = self.g_num
+        self.add_edges(self, new_node)
+        self.compute()
+
+    def clear(self):
+        self.g_num = 0
+        # self.nodes = list(map(lambda node: node.g_num * 0, self.nodes))
+        for node in self.nodes:
+            node.g_num = 0
 
 # データ構造構築
 def init_graph(verts, h=10, w=10):
-    global NUMBERS
+    global NUMBERS, colors
+    NUMBERS = list(range(1,3001))    # 面番号
+    colors = []
+    for i in range(3000):
+        colors.append(list(np.random.choice(range(256), size=3)))
+
     nodes = []
     rejected_nodes = []
     edges = []
         
-    NUMBERS = list(range(1,10000))    # 面番号
-
     # 10×10が横にいくつあるかの数
     width = len(verts[0]) // w 
     height = len(verts) // h
@@ -92,7 +127,7 @@ def init_graph(verts, h=10, w=10):
         nodes_line = []
         for j in range(width):
             # node は論文の v
-            node = Node(verts[i*h:i*h+h,j*w:j*w+w])
+            node = Node(verts[i*h:i*h+h,j*w:j*w+w], [i, j])
             # nodeの除去の判定
             if reject_node(node):
                 rejected_nodes.append(node)
@@ -102,21 +137,21 @@ def init_graph(verts, h=10, w=10):
     # 右・下の繋がりを調べる
     for i in range(len(nodes)):
         for j in range(len(nodes[0])):
-            if nodes[i][j].reject_type == None:
+            if nodes[i][j].node_type == TYPE_NORMAL:
                 if j+1<len(nodes[0]) and not rejectedge(nodes[i][j], nodes[i][j+1]):
                     nodes[i][j].right = nodes[i][j+1]
-                    nodes[i][j].edge.append(nodes[i][j+1])
+                    nodes[i][j].edges.append(nodes[i][j+1])
 
                     nodes[i][j+1].left = nodes[i][j]
-                    nodes[i][j+1].edge.append(nodes[i][j])
+                    nodes[i][j+1].edges.append(nodes[i][j])
 
                     edges.append(nodes[i][j])
                 if i+1<len(nodes) and not rejectedge(nodes[i][j], nodes[i+1][j]):
                     nodes[i][j].down = nodes[i+1][j]
-                    nodes[i][j].edge.append(nodes[i+1][j])
+                    nodes[i][j].edges.append(nodes[i+1][j])
 
                     nodes[i+1][j].up = nodes[i][j]
-                    nodes[i+1][j].edge.append(nodes[i][j])
+                    nodes[i+1][j].edges.append(nodes[i][j])
 
                     edges.append(nodes[i][j])
 
@@ -124,20 +159,20 @@ def init_graph(verts, h=10, w=10):
     
     print(f"rejectされていないノード数: {sum(len(v) for v in nodes) - len(rejected_nodes)}")
     print(f"エッジ数: {len(edges)}")
-    rand = random.randint(0, len(rejected_nodes))
+    # rand = random.randint(0, len(rejected_nodes))
     # print(f"rejectされたノードの例: {[node.data for node in rejected_nodes[rand:rand+1]]}")
-    # print(f"reject理由: {[node.reject_type for node in rejected_nodes[rand:rand+1]]}")
+    # print(f"reject理由: {[node.node_type for node in rejected_nodes[rand:rand+1]]}")
     # print("-------------------------------------------------------------------------------")
 
     return nodes, edges
 
 # ノードの除去
-def reject_node(node, threshold=100):
+def reject_node(node, threshold=25):
     data = node.data
 
     # データが欠落していたら
     if np.any(data[..., -1] == 0):
-        node.reject_type = MISSING_DATA
+        node.node_type = TYPE_MISSING_DATA
         return True
 
     # 周囲4点との差
@@ -145,13 +180,17 @@ def reject_node(node, threshold=100):
     h_diff = np.linalg.norm(data[:, :-1] - data[:, 1:], axis=2)
 
     if v_diff.max() > threshold or h_diff.max() > threshold:
-        node.reject_type = BIG_DIFF
+        node.node_type = TYPE_DEPTH_DISCONTINUE
         return True
 
+    node.compute()
+    node.set_params(0)
     # print(f"mse = {node.mse}    t = {node.t_mse}")
-
-    if node.mse > 2000:   #閾値適当
-        node.reject_type = BIG_MSE
+    # with open("mse_my.txt", mode="a") as f:
+    #     f.write(str(node.mse) + "\n")
+    #     f.write(str(node.t_mse) + "\n" + "\n")
+    if node.mse > node.t_mse:
+        node.node_type = TYPE_BIG_MSE
         return True
 
     return False
@@ -159,7 +198,7 @@ def reject_node(node, threshold=100):
 # 連結関係の除去
 def rejectedge(node1, node2):
     # 欠落していなければ
-    if node2.reject_type != None:
+    if node2.node_type != TYPE_NORMAL:
         return True 
 
     pfn = np.abs(np.dot(node1.normal, node2.normal))
@@ -169,83 +208,93 @@ def rejectedge(node1, node2):
 
     return False
 
-# 平均二乗誤差の計算
-def mse(array):
-    pca = PCA()
-    if array.size == 1:
-        return math.inf
-    pca.fit(array)
-    # print(f"array: {array}")
-    # print(f"fit: {pca.components_}")
-    # print("-----------------------------------------------------------")
-    return mean_squared_error(array, pca.fit_transform(array))  # 合ってるか不安
-
 # 粗い平面検出
 def ahcluster(nodes, edges):
+    global color_image, NODES, data
 
     # MSEの昇順のヒープを作る
     queue = build_mse_heap(edges)
-    boudaries = np.array([])
+    boudaries = []
+    flatten_nodes = sum(nodes, [])
     pai = np.array([])
 
     # queueの中身がある限り
-    while queue != []:
-        suf = queue.pop()
+    while queue != [] and NUMBERS:
+        suf = queue.pop(0)
+        print(len(queue))
+        # print(suf.data.size//3)
 
-        # 周りが同じ面ならばみない
-        if (suf.left and suf.g_num == suf.left.g_num) and (suf.right and suf.g_num == suf.right.g_num) and (suf.up and suf.g_num == suf.up.g_num) and (suf.down and suf.g_num == suf.down.g_num):
-            continue
+        # if suf.g_num != 0:
+        #     # 周りが同じ面ならばみない
+        #     if (suf.left and suf.g_num == suf.left.g_num) and (suf.right and suf.g_num == suf.right.g_num) and (suf.up and suf.g_num == suf.up.g_num) and (suf.down and suf.g_num == suf.down.g_num):
+        #         continue
 
         # vがマージされているならば
-        """
-        if suf not in nodes:
+        if suf not in flatten_nodes:
             continue
-        """
-
-        # 面番号がなければ定義する
-        if suf.g_num == 0:
-            suf.g_num = NUMBERS.pop()
+        if len(suf.edges) <= 0:
+            if len(suf.nodes) >= 10:
+                boudaries.append(suf)
+            else:
+                suf.clear()
+                
+            continue
 
         # vと連結関係にあるuを取り出して
         # 連結関係のノードをマージする
         best_mse = [math.inf, None]
-        for edg in suf.edge:
-            suf.push(edg)
-            if suf.mse < best_mse[0]:
-                best_mse = [suf.mse, edg]
-            suf.undo()
+        # print(len(suf.edges))
+        for edg in suf.edges:
+            current_mse = suf.calculate_pf_mse(edg.data)
+            if current_mse < best_mse[0]:
+                best_mse = [current_mse, edg]
+
+        # print(len(suf.edges))
 
         # マージ失敗
-        if best_mse[0] >= 0.001:
-            continue
-            boudaries = boudaries.append(suf)
-            pai = pai.append(plane(suf_best))
+        suf.set_params(1)
+        # print(best_mse[0])
+        if best_mse[0] >= suf.t_mse:
+            # print("aaaaaaaaaaaaaaaaaaaaaaaaaaa")
+            flatten_nodes.remove(suf)
+            if suf.data.size >= 800:
+                boudaries.append(Plane(suf, best_mse[1]))
 
         # マージ成功
         else:
-            suf.push(best_mse[1], True)
-            queue.append(suf)
-            # suf_choice.g_num = suf.g_num
-    return boudaries, pai
+            for rm in [suf, best_mse[1]]:
+                if rm in flatten_nodes:
+                    flatten_nodes.remove(rm)
+            if type(suf) == Node:
+                suf = Plane(suf, best_mse[1])
+            else:
+                suf.push(best_mse[1])
+            queue.insert(0, suf)
+            # queue.append(suf)
+            flatten_nodes.append(suf)
+            # if best_mse[1] in queue:
+            #     queue.remove(best_mse[1])
 
-# 平面近似PCA
-def plane(v):
-    pca = PCA()
-    return pca.fit(v)
+        # color_image = data[0, 0][1]
+        # color_image = visualization(color_image, NODES)
+
+        # cv2.namedWindow('RealSense', cv2.WINDOW_AUTOSIZE)
+        # cv2.imshow('RealSense', color_image)
+        # cv2.waitKey(50)
+
+
+    # for i in range(10, 100, 5):
+    #     print(f"members: {len(boudaries[i].nodes)}")
+    #     print(f"group: {boudaries[i].g_num}")
+    #     print(f"edges: {len(boudaries[i].edges)}")
+    #     print("------------------------")
+    return boudaries, pai
 
 # ヒープの作成
 def build_mse_heap(edges):
     # 1つずつmseを計算し直して並べ替える)
     queue = sorted(edges, key=lambda node: node.mse)
-    print(queue[len(queue)//2].mse)
-    print(queue[10].mse)
-    print(queue[-1].mse)
     return queue
-
-# 先頭を取り出す
-def popmin(queue):
-    choice = queue.popleft()
-    return choice
 
 # 粗い平面検出の精緻化
 # Bk,Rk,Rlは任意の順番のという意味かもしれない
@@ -293,7 +342,10 @@ def refine(boundaries, pai):
     return cluster, pro_pai
 
 def visualization(color_image, nodes):
+    global colors
     color_image = np.copy(color_image)
+    
+
     BLACK = [0, 0, 0]
     RED = [0, 0, 255]
     ORANGE = [17, 144, 255]
@@ -303,29 +355,29 @@ def visualization(color_image, nodes):
     GREEN = [51, 255, 51]
     BLUE = [255, 90, 0]
 
-    color_image[::10] = BLACK
-    color_image[:, ::10] = BLACK    
+    # color_image[::10] = BLACK
+    # color_image[:, ::10] = BLACK    
     
     for h in range(0, len(color_image), 10):
         for w in range(0, len(color_image[0]), 10):
-            if nodes[h//10][w//10].reject_type == MISSING_DATA:
-                color_image[h+4:h+7, w+4:w+7] = BLACK
-            elif nodes[h//10][w//10].reject_type == BIG_DIFF:
-                color_image[h+4:h+7, w+4:w+7] = ORANGE
-            elif nodes[h//10][w//10].reject_type == BIG_MSE:
-                color_image[h+4:h+7, w+4:w+7] = RED
+            # if nodes[h//10][w//10].node_type == TYPE_MISSING_DATA:
+            #     color_image[h+4:h+7, w+4:w+7] = BLACK
+            # elif nodes[h//10][w//10].node_type == TYPE_DEPTH_DISCONTINUE:
+            #     color_image[h+4:h+7, w+4:w+7] = ORANGE
+            # elif nodes[h//10][w//10].node_type == TYPE_BIG_MSE:
+            #     color_image[h+4:h+7, w+4:w+7] = RED
 
-            if nodes[h//10][w//10].up:
-                color_image[h-5:h+5, w+5] = PURPLE
-            if nodes[h//10][w//10].down:
-                color_image[h+5:h+15, w+5] = PURPLE
-            if nodes[h//10][w//10].left:
-                color_image[h+5, w-5:w+5] = PURPLE
-            if nodes[h//10][w//10].right:
-                color_image[h+5, w+5:w+15] = PURPLE
+            # if nodes[h//10][w//10].up:
+            #     color_image[h-5:h+5, w+5] = PURPLE
+            # if nodes[h//10][w//10].down:
+            #     color_image[h+5:h+15, w+5] = PURPLE
+            # if nodes[h//10][w//10].left:
+            #     color_image[h+5, w-5:w+5] = PURPLE
+            # if nodes[h//10][w//10].right:
+            #     color_image[h+5, w+5:w+15] = PURPLE
 
-            # if nodes[h//10][w//10].g_num != 0:
-            #     color_image[h+1:h+10, w+1:w+10] = [nodes[h//10][w//10].g_num+100]
+            if nodes[h//10][w//10].g_num != 0:
+                color_image[h+1:h+10, w+1:w+10] = colors[nodes[h//10][w//10].g_num+1]
 
     return color_image
 

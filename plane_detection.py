@@ -1,7 +1,19 @@
 # @author Timur
 # @author Yasu
 
+"""深さ情報を持つ映像・画像における面検知
+
+深さ情報を一定の大きさのごとに区切る(以後ノードと表す)
+ノード同士の深さや角度により同一面とみなせるか判定する
+一定の大きさになったものは面として抽出する
+その後面の境界から未検出領域に点単位で深さを比較する
+ランダムな色をつけて表示する
+
+"""
+
 from collections import deque
+from turtle import distance
+from tqdm import tqdm
 import math
 import cv2
 import numpy as np
@@ -9,9 +21,7 @@ import scipy.io
 import random
 import sys
 import pyrealsense2 as rs
-from sklearn.decomposition import PCA
-from sklearn.metrics import mean_squared_error
-from functools import singledispatch
+import time
 
 # Nodeのタイプ
 TYPE_NORMAL = 0
@@ -19,37 +29,161 @@ TYPE_MISSING_DATA = 1
 TYPE_DEPTH_DISCONTINUE = 2
 TYPE_BIG_MSE = 3
 
+PUSH = 0
+POP = 1
+
+START = "CALLED"
+END = "DONE"
+
+# 表示用の色
+BLACK = [0, 0, 0]
+RED = [0, 0, 255]
+ORANGE = [17, 144, 255]
+PURPLE = [255, 0, 127]
+
+# 表示用フラグ
 REAL_TIME = False
-sys.setrecursionlimit(10000) 
+DEFAULT = 0
+INIT_GRAPH = 1
 
-# 処理の概形\
-# 入力は2次元になった
-def fast_plane_extraction(verts):
-    global NODES
-    # データ構造構築(ステップ1)
-    NODES, edges = init_graph(verts)
+# 設定
+sys.setrecursionlimit(10000)
+np.set_printoptions(threshold=np.inf)
 
-    # 粗い平面検出(ステップ2)
-    boudaries, pai = ahcluster(NODES, edges)
-    # # 粗い平面検出を精緻化(ステップ3)
-    # cluster, pro_pai = refine(boudaries, pai)
-    # return cluster, pro_pai
-    return NODES, None
+class Global:
+    """グローバルで使う関数
+
+    """
+    def __init__(self, h=480, w=640, number_of_groups=3000):
+        self.group_numbers = list(range(1,number_of_groups+1))    # 面番号
+        self.colors = []
+        for i in range(number_of_groups):
+            self.colors.append(list(np.random.choice(range(256), size=3)))
+        self.refine_edges = set()
+
+        set_time()
+        self.log_file = open('log.txt', 'x')
+
+    def detect(self):
+        # データ構造構築(ステップ1)
+        self.nodes, self.edges = init_graph(points, verts)
+
+        # 粗い平面検出(ステップ2)
+        self.planes = ahcluster(self.nodes, self.edges)
+
+        # 粗い平面検出を精緻化(ステップ3)
+        self.planes = refine(self.planes)
+
+        for node in sum(glob.nodes, []):
+            for point in node.members:
+                point.g_num = node.g_num
+
+        self.log_file.close()
+
+    def visualize(self, show_depth=False, distinguish=None, mode=DEFAULT):
+        image = np.copy(color_image)
+        # image[::10] = BLACK
+        # image[:, ::10] = BLACK    
+        
+        if mode == INIT_GRAPH:
+            for h in range(0, len(image), 10):
+                for w in range(0, len(image[0]), 10):
+                    if mode == INIT_GRAPH:
+                        if self.nodes[h//10][w//10].node_type == TYPE_MISSING_DATA:
+                            image[h+4:h+7, w+4:w+7] = BLACK
+                        elif self.nodes[h//10][w//10].node_type == TYPE_DEPTH_DISCONTINUE:
+                            image[h+4:h+7, w+4:w+7] = ORANGE
+                        elif self.nodes[h//10][w//10].node_type == TYPE_BIG_MSE:
+                            image[h+4:h+7, w+4:w+7] = RED
+
+                        if self.nodes[h//10][w//10].up:
+                            image[h-5:h+5, w+5] = PURPLE
+                        if self.nodes[h//10][w//10].down:
+                            image[h+5:h+15, w+5] = PURPLE
+                        if self.nodes[h//10][w//10].left:
+                            image[h+5, w-5:w+5] = PURPLE
+                        if self.nodes[h//10][w//10].right:
+                            image[h+5, w+5:w+15] = PURPLE
+
+                    # continue
+
+                # if self.nodes[h//10][w//10].g_num != 0:
+                #     image[h+1:h+10, w+1:w+10] = self.colors[self.nodes[h//10][w//10].g_num+1]
+        else:
+            for h in range(0, len(image)):
+                for w in range(0, len(image[0])):
+                    if points[h][w].g_num != 0:
+                        image[h, w] = self.colors[points[h][w].g_num+1]
+
+        if distinguish:
+            image[distinguish[0]*10:distinguish[0]*10+11:10] = RED
+            image[:, distinguish[1]*10:distinguish[1]*10+11:10] = RED
+
+        if show_depth:
+            # Apply colormap on depth image (image must be converted to 8-bit per pixel first)
+            depth_scale = cv2.convertScaleAbs(depth_image, alpha=0.03)  #0～255の値にスケール変更している
+
+            depth_colormap = cv2.applyColorMap(depth_scale, cv2.COLORMAP_JET)
+
+            # Stack both images horizontally
+            image = np.hstack((image, depth_colormap))
+
+        return image
+
+class Point:
+    """画像の点一つが持つ情報を作成するクラス
+
+    """
+    def __init__(self, data, cord):
+        """init関数
+
+        クラス作成時に定義される
+
+        Args:
+            data (_type_): _description_
+            cord (_type_): _description_
+            node (): 属するノード
+            refine (): 
+            g_num (int): 面の番号
+
+        """
+        self.data = data
+        self.cord = cord
+        self.node = None
+        self.refined = None
+        self.g_num = 0
 
 # Nodeのクラス
 class Node:
-    def __init__(self, data, index):        #data: 点群の配列   ind: Nodeの座標
-        self.data = np.nan_to_num(data)     # 点群の配列　np.array型(10×10)
+    """ノードのクラス
+
+
+
+    """
+    def __init__(self, points, data, index):        #data: 点群の配列   ind: Nodeの座標
+        """_summary_
+
+        Args:
+            points (_type_): _description_
+            data (_type_): _description_
+            index (_type_): _description_
+        """
+        self.data = np.reshape(np.nan_to_num(data), (100,3))     # 点群の配列　np.array型(10×10)
+        self.members = set(points)
+        for point in self.members:
+            point.node = self
         self.g_num = 0                      # グループの番号,初期値0
         self.node_type = TYPE_NORMAL        # Nodeのタイプ
         self.ind = index                    # 左上からの座標
+        self.refine_pc = set()
+        self.plane = None
 
         # つながりがある上下左右のNode
         self.left = None
         self.right = None
         self.up = None
         self.down = None
-        self.edges = []
+        self.edges = set()
 
     def set_params(self, phase):   # 閾値定義
         if phase == 0:
@@ -57,6 +191,17 @@ class Node:
         else:
             self.t_mse = (1.6e-6*self.center[2]**2+8)**2
         self.t_mse = 15
+
+    def push(self):
+        for point in self.refine_pc:
+            self.members.add(point)
+            point.node = self
+            if np.any(point.data == 0):
+                continue
+            self.data = np.vstack([self.data, point.data])
+
+        # if self.node_type != TYPE_MISSING_DATA:
+        self.compute()
 
     def compute(self):
         self.center = [np.average(self.data[..., 0]), np.average(self.data[..., 1]), np.average(self.data[..., 2])]    # 平均(重心)
@@ -71,7 +216,8 @@ class Node:
         else:
             self.normal = -eig[1][ind]
 
-    def calculate_pf_mse(self, data):
+    def calculate_pf_mse(self, new_data):
+        data = np.concatenate([self.data, new_data])
         cov = np.cov(data[..., :2].reshape(data.size//3, 2).T, data[..., 2].reshape(data.size//3,), rowvar=True)     # 分散共分散行列
 
         eig = np.linalg.eig(cov)   
@@ -79,45 +225,94 @@ class Node:
         mse = eig[0][ind]  # 最小の固有値
 
         return mse
-
+    
+# nodeのマージのためのクラス
 class Plane(Node):
     def __init__(self, node_a, node_b):
         self.data = np.concatenate([node_a.data, node_b.data])
-        self.nodes = [node_a, node_b]
-        self.g_num = node_a.g_num = node_b.g_num =  NUMBERS.pop(0)
+        self.members = {node_a, node_b}
+        node_a.plane = node_b.plane = self
+        self.g_num = node_a.g_num = node_b.g_num = glob.group_numbers.pop(0)
+        for node in self.members:
+            for point in node.members:
+                point.g_num = self.g_num
         self.add_edges(node_a, node_b)
         self.compute()
+        self.calc_plane_d(self.data[0])
 
     def add_edges(self, node_a, node_b):
-        self.edges = list(set(node_a.edges + node_b.edges))
-        for rm in self.nodes:
+        self.edges = node_a.edges | node_b.edges
+        for rm in self.members:
             if rm in self.edges:
                 self.edges.remove(rm)
 
-    def push(self, new_node):
-        self.data = np.concatenate([self.data, new_node.data])
-        self.nodes.append(new_node)
-        new_node.g_num = self.g_num
-        self.add_edges(self, new_node)
-        self.compute()
+    def push(self, subject, has_plane=False):
+        self.data = np.concatenate([self.data, subject.data])
+        self.add_edges(self, subject)
+        if has_plane:
+            self.members.add(subject.members)
+            subject.g_num = self.g_num
+            for point in subject.members:
+                point.g_num = self.g_num
+        else:
+            self.members.add(subject)
+            subject.g_num = self.g_num
+            for point in subject.members:
+                point.g_num = self.g_num
+        # self.compute()
+
+    def pop(self, node):
+        self.data= np.delete(self.data, np.argwhere(self.data == node.data))
+        self.members.remove(node)
+        node.g_num = 0
+        # self.compute()
 
     def clear(self):
         self.g_num = 0
-        # self.nodes = list(map(lambda node: node.g_num * 0, self.nodes))
-        for node in self.nodes:
+        # self.members = list(map(lambda node: node.g_num * 0, self.members))   #出来なかったやつ
+        for node in self.members:
             node.g_num = 0
+            for point in node.members:
+                point.g_num = 0
+
+    #  面の平面方程式を求める関数(dの情報がほしい)
+    def calc_plane_d(self, point_cord):
+        # 法線ベクトルと通る点から求める
+        self.d = -1*((self.normal[0]*point_cord[0]) + (self.normal[1]*point_cord[1]) + (self.normal[2]*point_cord[2]))
 
 # データ構造構築
-def init_graph(verts, h=10, w=10):
-    global NUMBERS, colors
-    NUMBERS = list(range(1,3001))    # 面番号
-    colors = []
-    for i in range(3000):
-        colors.append(list(np.random.choice(range(256), size=3)))
+def init_graph(points, verts, h=10, w=10):
+    """深さデータからノードとそれらのつながりを作成する
 
+    深さデータを引数h,wで指定した値ごとに区切ったノード(オブジェクト)を作る
+    その際にデータの欠損や極端な値がないかを調べあるものは欠損ノードとする
+    作成したノードのつながりを調べクラスの繋がりの情報(エッジ)を更新する
+    作成したノードの集合とエッジを持ったノードの集合を作成し戻り値とする
+
+    Args:
+        points: 
+        verts: 
+        h: ノードをつくる縦の幅の値
+        w: ノードをつくる横の幅の値
+
+    Returns:
+        nodes: ノードオブジェクトの集合
+        edges: エッジ情報を更新したノードオブジェクトの集合
+
+    Raises:
+
+    Yields:
+        なし
+
+    Examples:
+
+        >>> nodes, edges = init_graph(points, verts, 10, 10)
+
+    """
+    log(sys._getframe().f_code.co_name, START)
     nodes = []
-    rejected_nodes = []
-    edges = []
+    rejected_nodes = set()
+    edges = set()
         
     # 10×10が横にいくつあるかの数
     width = len(verts[0]) // w 
@@ -127,10 +322,10 @@ def init_graph(verts, h=10, w=10):
         nodes_line = []
         for j in range(width):
             # node は論文の v
-            node = Node(verts[i*h:i*h+h,j*w:j*w+w], [i, j])
+            node = Node(sum([row[j*w:j*w+w] for row in points[i*h:i*h+h]], []), verts[i*h:i*h+h,j*w:j*w+w], [i, j])
             # nodeの除去の判定
             if reject_node(node):
-                rejected_nodes.append(node)
+                rejected_nodes.add(node)
             nodes_line.append(node)
         nodes.append(nodes_line)
 
@@ -140,22 +335,20 @@ def init_graph(verts, h=10, w=10):
             if nodes[i][j].node_type == TYPE_NORMAL:
                 if j+1<len(nodes[0]) and not rejectedge(nodes[i][j], nodes[i][j+1]):
                     nodes[i][j].right = nodes[i][j+1]
-                    nodes[i][j].edges.append(nodes[i][j+1])
+                    nodes[i][j].edges.add(nodes[i][j+1])
 
                     nodes[i][j+1].left = nodes[i][j]
-                    nodes[i][j+1].edges.append(nodes[i][j])
+                    nodes[i][j+1].edges.add(nodes[i][j])
 
-                    edges.append(nodes[i][j])
+                    edges.add(nodes[i][j])
                 if i+1<len(nodes) and not rejectedge(nodes[i][j], nodes[i+1][j]):
                     nodes[i][j].down = nodes[i+1][j]
-                    nodes[i][j].edges.append(nodes[i+1][j])
+                    nodes[i][j].edges.add(nodes[i+1][j])
 
                     nodes[i+1][j].up = nodes[i][j]
-                    nodes[i+1][j].edges.append(nodes[i][j])
+                    nodes[i+1][j].edges.add(nodes[i][j])
 
-                    edges.append(nodes[i][j])
-
-    edges = list(set(edges))
+                    edges.add(nodes[i][j])
     
     print(f"rejectされていないノード数: {sum(len(v) for v in nodes) - len(rejected_nodes)}")
     print(f"エッジ数: {len(edges)}")
@@ -164,16 +357,29 @@ def init_graph(verts, h=10, w=10):
     # print(f"reject理由: {[node.node_type for node in rejected_nodes[rand:rand+1]]}")
     # print("-------------------------------------------------------------------------------")
 
+    log(sys._getframe().f_code.co_name, END)
     return nodes, edges
 
 # ノードの除去
 def reject_node(node, threshold=25):
-    data = node.data
+    """_summary_
+
+    Args:
+        node (_type_): _description_
+        threshold (int, optional): _description_. Defaults to 25.
+
+    Returns:
+        _type_: _description_
+    """
+    data = np.reshape(node.data, (10, 10, 3))
 
     # データが欠落していたら
     if np.any(data[..., -1] == 0):
         node.node_type = TYPE_MISSING_DATA
         return True
+
+    node.compute()
+    node.set_params(0)
 
     # 周囲4点との差
     v_diff = np.linalg.norm(data[:-1] - data[1:], axis=2)
@@ -183,8 +389,6 @@ def reject_node(node, threshold=25):
         node.node_type = TYPE_DEPTH_DISCONTINUE
         return True
 
-    node.compute()
-    node.set_params(0)
     # print(f"mse = {node.mse}    t = {node.t_mse}")
     # with open("mse_my.txt", mode="a") as f:
     #     f.write(str(node.mse) + "\n")
@@ -210,31 +414,29 @@ def rejectedge(node1, node2):
 
 # 粗い平面検出
 def ahcluster(nodes, edges):
-    global color_image, NODES, data
+    log(sys._getframe().f_code.co_name, START)
 
     # MSEの昇順のヒープを作る
     queue = build_mse_heap(edges)
-    boudaries = []
+    planes = []
     flatten_nodes = sum(nodes, [])
-    pai = np.array([])
+
+    pbar = tqdm(total=len(queue))
 
     # queueの中身がある限り
-    while queue != [] and NUMBERS:
-        suf = queue.pop(0)
-        print(len(queue))
-        # print(suf.data.size//3)
-
-        # if suf.g_num != 0:
-        #     # 周りが同じ面ならばみない
-        #     if (suf.left and suf.g_num == suf.left.g_num) and (suf.right and suf.g_num == suf.right.g_num) and (suf.up and suf.g_num == suf.up.g_num) and (suf.down and suf.g_num == suf.down.g_num):
-        #         continue
+    while len(queue) > 0:
+        log(sys._getframe().f_code.co_name, None, "loop_start")
+        suf = queue.popleft()
+        log(sys._getframe().f_code.co_name, None, f"len of edges: {str(len(suf.edges))}")
 
         # vがマージされているならば
         if suf not in flatten_nodes:
+            pbar.update(1)
             continue
         if len(suf.edges) <= 0:
-            if len(suf.nodes) >= 10:
-                boudaries.append(suf)
+            pbar.update(1)
+            if len(suf.members) >= 10:
+                planes.append(suf)
             else:
                 suf.clear()
                 
@@ -243,22 +445,19 @@ def ahcluster(nodes, edges):
         # vと連結関係にあるuを取り出して
         # 連結関係のノードをマージする
         best_mse = [math.inf, None]
-        # print(len(suf.edges))
         for edg in suf.edges:
             current_mse = suf.calculate_pf_mse(edg.data)
             if current_mse < best_mse[0]:
                 best_mse = [current_mse, edg]
 
-        # print(len(suf.edges))
-
         # マージ失敗
         suf.set_params(1)
         # print(best_mse[0])
         if best_mse[0] >= suf.t_mse:
-            # print("aaaaaaaaaaaaaaaaaaaaaaaaaaa")
             flatten_nodes.remove(suf)
-            if suf.data.size >= 800:
-                boudaries.append(Plane(suf, best_mse[1]))
+            pbar.update(1)
+            if len(suf.members) >= 10:
+                planes.append(Plane(suf, best_mse[1]))
 
         # マージ成功
         else:
@@ -268,137 +467,191 @@ def ahcluster(nodes, edges):
             if type(suf) == Node:
                 suf = Plane(suf, best_mse[1])
             else:
-                suf.push(best_mse[1])
-            queue.insert(0, suf)
-            # queue.append(suf)
+                if best_mse[1].plane:
+                    best_mse[1].plane.push(suf)
+                else:
+                    suf.push(best_mse[1])
+            queue.appendleft(suf)
             flatten_nodes.append(suf)
-            # if best_mse[1] in queue:
-            #     queue.remove(best_mse[1])
 
-        # color_image = data[0, 0][1]
-        # color_image = visualization(color_image, NODES)
+        log(sys._getframe().f_code.co_name, None, "loop_end")
 
-        # cv2.namedWindow('RealSense', cv2.WINDOW_AUTOSIZE)
-        # cv2.imshow('RealSense', color_image)
-        # cv2.waitKey(50)
-
+    # 演出用
+    # image = glob.visualize()
+    # cv2.namedWindow('RealSense', cv2.WINDOW_AUTOSIZE)
+    # cv2.imshow('RealSense', image)
+    # cv2.waitKey(5)
 
     # for i in range(10, 100, 5):
-    #     print(f"members: {len(boudaries[i].nodes)}")
-    #     print(f"group: {boudaries[i].g_num}")
-    #     print(f"edges: {len(boudaries[i].edges)}")
+    #     print(f"members: {len(planes[i].members)}")
+    #     print(f"group: {planes[i].g_num}")
+    #     print(f"edges: {len(planes[i].edges)}")
     #     print("------------------------")
-    return boudaries, pai
+    pbar.close()
+
+    log(sys._getframe().f_code.co_name, END)
+    return planes
+
+def set_time():
+    global start_time
+    start_time = time.time()
+
+def log(func_name, flag=None, message=None):
+    # calculate elapsed time
+    elapsed_time = int(time.time() - start_time)
+
+    # convert second to hour, minute and seconds
+    elapsed_hour = elapsed_time // 3600
+    elapsed_minute = (elapsed_time % 3600) // 60
+    elapsed_second = (elapsed_time % 3600 % 60)
+
+    glob.log_file.write(f"{func_name} {str(elapsed_hour).zfill(2)}:{str(elapsed_minute).zfill(2)}:{str(elapsed_second).zfill(2)}  :  ")
+
+    if flag:
+        glob.log_file.write(f"{flag}\n")
+    if message:
+        glob.log_file.write(f"{message}\n")
 
 # ヒープの作成
 def build_mse_heap(edges):
+    log(sys._getframe().f_code.co_name, START)
+
     # 1つずつmseを計算し直して並べ替える)
-    queue = sorted(edges, key=lambda node: node.mse)
+    queue = deque(sorted(edges, key=lambda node: node.mse))
+
+    log(sys._getframe().f_code.co_name, END)
     return queue
 
 # 粗い平面検出の精緻化
-# Bk,Rk,Rlは任意の順番のという意味かもしれない
-def refine(boundaries, pai):
-    # キュー
+def refine(planes):
+    # 境界面のpointのみを集める
+    glob.boud_queue = build_boud_heap(planes)
+    # glob.pbar = tqdm(total=len(glob.boud_queue))
+
+    while len(glob.boud_queue) > 0:
+        # print(len(glob.boud_queue))
+        point = glob.boud_queue.popleft()
+        check_ref_points(point)
+    
+    for node in sum(glob.nodes, []):
+        node.push()
+        for point in node.members:
+            point.g_num = node.g_num
+    # glob.pbar.close()
+    return ahcluster(glob.nodes, glob.refine_edges | glob.edges)
+
+def build_boud_heap(planes):
     queue = deque()
-    refine = np.array()
-    rf_nodes = np.array()
-    rf_edges = np.array()
-    for k, boundary in enumerate(boundaries):
-        refine_k = np.array()
-        # 謎ポイント
-        refine = refine.append(refine_k)
-        # フチを除く
-        for v in boundary:
-            # 上下左右のノードが面内ではないならば
-            if v not in boundary:
-                # 境界点判定
-                boundary = boundary.remove(v)
-        # 除去した境界のポイントを個別でみる
-        for p in v:
-            # kとは何の値？→インデックス？pとのタプルで追加しろといっている？
-            queue.append({p, k})
-        if boundary != None:
-            rf_nodes = rf_nodes.appned(boundary)
-    while queue != None:
-        points = queue.popleft()
-        k = points[1]
-        for p in points[0]:
-            if (p in boundary) or (p in refine_k) or (math.dist(p, pai[k]) >= 9 * mse(boundary[k])):
-                continue
-            # lが存在するならば？l=k+1？
-            if (k+1 <= len(boundaries)) or (p in refine):
-                rf_edges = rf_edges.append({boundary_k,boundary_l})
-                if math.dist(p, pai[k]) < math.dist(p, pai[k+1]):
-                    refine_l = refine_l.remove(p)
-                    refine_k = refine_k.append(p)
-            else:
-                refine_k = refine_k.append(p)
-                queue.append({p, k})
-                # enqueue
-    for refine_k in refine:
-        boundary_k = boundary_k.append(refine_k)
-    cluster, pro_pai = ahcluster(rf_nodes, rf_edges)
-    return cluster, pro_pai
+    # queue.extend(sum(points, []))
+    # 上下左右のどれかが欠落nodeまたは端ならば面から除去
+    for plane in planes:
+        nodes_to_pop = []
+        for i in range(2):
+            for node in plane.members:
+                y, x = node.ind
+                try:
+                    if glob.nodes[y][x-1].g_num != node.g_num or glob.nodes[y][x+1].g_num != node.g_num or glob.nodes[y-1][x].g_num != node.g_num or glob.nodes[y+1][x].g_num != node.g_num:
+                        if node not in nodes_to_pop:
+                            nodes_to_pop.append(node)
+                except IndexError:
+                    if node not in nodes_to_pop:
+                        nodes_to_pop.append(node)
+                if i == 1:  #２回目の時はノードのポイント達をキューに追加
+                    queue.extend(node.members)
+                    pass
 
-def visualization(color_image, nodes):
-    global colors
-    color_image = np.copy(color_image)
-    
+        for node in nodes_to_pop:
+            plane.pop(node)
 
-    BLACK = [0, 0, 0]
-    RED = [0, 0, 255]
-    ORANGE = [17, 144, 255]
-    PURPLE = [255, 0, 127]
-    PINK = [102, 0, 255]
-    GRAY = [128, 128, 128]
-    GREEN = [51, 255, 51]
-    BLUE = [255, 90, 0]
+    print("build_boud_heap: end")
+    log()
 
-    # color_image[::10] = BLACK
-    # color_image[:, ::10] = BLACK    
-    
-    for h in range(0, len(color_image), 10):
-        for w in range(0, len(color_image[0]), 10):
-            # if nodes[h//10][w//10].node_type == TYPE_MISSING_DATA:
-            #     color_image[h+4:h+7, w+4:w+7] = BLACK
-            # elif nodes[h//10][w//10].node_type == TYPE_DEPTH_DISCONTINUE:
-            #     color_image[h+4:h+7, w+4:w+7] = ORANGE
-            # elif nodes[h//10][w//10].node_type == TYPE_BIG_MSE:
-            #     color_image[h+4:h+7, w+4:w+7] = RED
+    return queue
 
-            # if nodes[h//10][w//10].up:
-            #     color_image[h-5:h+5, w+5] = PURPLE
-            # if nodes[h//10][w//10].down:
-            #     color_image[h+5:h+15, w+5] = PURPLE
-            # if nodes[h//10][w//10].left:
-            #     color_image[h+5, w-5:w+5] = PURPLE
-            # if nodes[h//10][w//10].right:
-            #     color_image[h+5, w+5:w+15] = PURPLE
+# pointの上下左右を確認しnodeのつながりを定義し直す関数
+# pointクラスがあること前提(上下左右の情報や所属しているnode自体やその面番号の情報がほしい)
+def check_ref_points(point):
+    """_summary_
 
-            if nodes[h//10][w//10].g_num != 0:
-                color_image[h+1:h+10, w+1:w+10] = colors[nodes[h//10][w//10].g_num+1]
+    Args:
+        point (_type_): _description_
 
-    return color_image
+    Note:
+        point_position = np.argwhere((verts==point).all()) できてない
+    """
 
-if __name__ == '__main__':
-    if not REAL_TIME:
-        data = scipy.io.loadmat('frame.mat')["frame"]
-        verts = data[0, 0][0]
-        color_image = data[0, 0][1]
+    # 左右上下の順で取り出す
+    for dir in [(0, -1), (0, 1), (-1, 0), (1, 0)]:
+        try:
+            adjacent = points[point.cord[0] + dir[0]][point.cord[1] + dir[1]]
+            result = make_refine(point, adjacent)
+            # if result:
+            #     glob.pbar.update(1)
+        except IndexError:
+            pass
 
-        cluster, pro_pai = fast_plane_extraction(verts)
+    print("check_ref_point: end")
+    log()
 
-        color_image = visualization(color_image, cluster)
+def connect(node_a, node_b):
+    node_a.edges.add(node_b)
+    node_b.edges.add(node_a)
+    glob.refine_edges.add(node_a)
+    glob.refine_edges.add(node_b)
 
-        cv2.namedWindow('RealSense', cv2.WINDOW_AUTOSIZE)
-        cv2.imshow('RealSense', color_image)
-        key = cv2.waitKey(0)
-        if key == ord("s"):
-                cv2.imwrite('./out_nr.png', color_image)
-        cv2.destroyAllWindows()
-    
+# 2つのpointが同じ面か，違う面か判定し，違う面なら
+def make_refine(point, adjacent):
+    # 取り出したポイントと同一node(k)に属している
+    if point.node == adjacent.node != None:
+        return True
+
+    # 同一のrefineポイントクラウド(k)に属している
+    elif adjacent in point.node.refine_pc:
+        return True
+
+    # node(k)平面との距離がnode(k)平面のMSEの9倍以上か
+    elif point.node.plane and calc_distance(point.node.plane, point) >= point.node.plane.mse*9 :
+        return True
+
+    # ポイントが他のrefineポイントクラウド(l)に属している場合
+    if adjacent.refined:
+        connect(point.node, adjacent.refined)
+
+        if point.node.plane and adjacent.node.plane and calc_distance(point.node.plane, adjacent) <= calc_distance(adjacent.node.plane, adjacent):
+            point.node.refine_pc.add(adjacent)
+            adjacent.refined.refine_pc.remove(adjacent)
+            glob.boud_queue.append(adjacent)
+        else:
+            return True
+
+    # ポイントが他のrefineポイントクラウド(l)に属していない場合
     else:
+        adjacent.refined = point.node
+        point.node.refine_pc.add(adjacent)
+        glob.boud_queue.append(adjacent)
+
+    print("make_refine: end")
+    log()       
+
+def calc_distance(suf, point):
+    """面と点の距離を計算する関数
+
+    Args:
+        suf (_type_): _description_
+        point (_type_): _description_
+
+    Returns:
+        _type_: _description_
+    """
+    dist = (abs(suf.normal[0]*point.data[0] + suf.normal[1]*point.data[1] + suf.normal[2]*point.data[2] + suf.d)) / (math.sqrt(suf.normal[0]**2 + suf.normal[1]**2 + suf.normal[2]**2))
+    
+    print("calc_distance: end")
+    log()
+    
+    return dist
+
+if __name__ == '__main__':   
+    if REAL_TIME:
         # Configure depth and color streams
         pipeline = rs.pipeline()
         config = rs.config()
@@ -424,35 +677,58 @@ if __name__ == '__main__':
                 continue
 
             # Convert images to numpy arrays
-            depth_image = np.asanyarray(depth_frame.get_data()) #計算に使用
+            depth_image = np.asanyarray(depth_frame.get_data())
             color_image = np.asanyarray(color_frame.get_data())
 
-            points = pc.calculate(depth_frame)
-            v = points.get_vertices()
-            verts = np.asanyarray(v).view(np.float32).reshape(480, 640, 3)  # xyz
+            verts = np.asanyarray(pc.calculate(depth_frame).get_vertices()).view(np.float32).reshape(480, 640, 3)  # xyz
+            points = []
 
-            cluster, pro_pai = fast_plane_extraction(verts)
+            for h in range(len(verts)):
+                line = []
+                for w in range (len(verts[0])):
+                    line.append(Point(verts[h,w], (h,w)))
+                points.append(line)
 
-            color_image = visualization(color_image, cluster)
+            glob = Global()
+            glob.detect()
 
-            # Apply colormap on depth image (image must be converted to 8-bit per pixel first)
-            depth_scale = cv2.convertScaleAbs(depth_image, alpha=0.03)  #0～255の値にスケール変更している
-
-            depth_colormap = cv2.applyColorMap(depth_scale, cv2.COLORMAP_JET)
-
-            # Stack both images horizontally
-            images = np.hstack((color_image, depth_colormap))
+            image = glob.visualize(True)
 
             # Show images
             cv2.namedWindow('RealSense', cv2.WINDOW_AUTOSIZE)
-            cv2.imshow('RealSense', images)
+            cv2.imshow('RealSense', image)
             key = cv2.waitKey(1)
             prop_val = cv2.getWindowProperty('RealSense', cv2.WND_PROP_ASPECT_RATIO)
 
             if key == ord("s"):
-                cv2.imwrite('./out.png', images)
+                cv2.imwrite('./out.png', image)
             if key == ord("q") or (prop_val < 0):
                 # Stop streaming
                 pipeline.stop()
                 cv2.destroyAllWindows()
                 break
+
+    else:
+        data = scipy.io.loadmat('frame.mat')["frame"]
+        verts = data[0, 0][0]
+        color_image = data[0, 0][1]
+        points = []
+
+        for h in range(len(verts)):
+            line = []
+            for w in range(len(verts[0])):
+                line.append(Point(verts[h,w], (h,w)))
+            points.append(line)
+
+        glob = Global()
+        glob.detect()
+
+        image = glob.visualize()
+
+        cv2.namedWindow('RealSense', cv2.WINDOW_AUTOSIZE)
+        cv2.imshow('RealSense', image)
+
+        key = cv2.waitKey(0)
+        if key == ord("s"):
+                cv2.imwrite('./out_nr.png', image)
+        cv2.destroyAllWindows()

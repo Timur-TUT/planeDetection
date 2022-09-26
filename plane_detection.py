@@ -65,6 +65,8 @@ class Global:
         self.log_file = open('log.txt', 'x')
 
     def detect(self):
+        """面検知の3ステップを行う
+        """
         # データ構造構築(ステップ1)
         self.nodes, self.edges = init_graph(points, verts)
 
@@ -81,6 +83,18 @@ class Global:
         self.log_file.close()
 
     def visualize(self, show_depth=False, distinguish=None, mode=DEFAULT):
+
+        """画像を表示する
+
+        Args:
+            show_depth (bool, optional): _description_. Defaults to False.
+            distinguish (_type_, optional): _description_. Defaults to None.
+            mode (_type_, optional): _description_. Defaults to DEFAULT.
+
+        Returns:
+            image : 色をつけた後の画像
+        """
+
         image = np.copy(color_image)
         # image[::10] = BLACK
         # image[:, ::10] = BLACK    
@@ -135,6 +149,7 @@ class Point:
 
     """
     def __init__(self, data, cord):
+
         """init関数
 
         クラス作成時に定義される
@@ -142,11 +157,9 @@ class Point:
         Args:
             data (_type_): _description_
             cord (_type_): _description_
-            node (): 属するノード
-            refine (): 
-            g_num (int): 面の番号
 
         """
+
         self.data = data
         self.cord = cord
         self.node = None
@@ -160,14 +173,16 @@ class Node:
 
 
     """
-    def __init__(self, points, data, index):        #data: 点群の配列   ind: Nodeの座標
+    def __init__(self, points, data, index):
+        
         """_summary_
 
         Args:
             points (_type_): _description_
-            data (_type_): _description_
-            index (_type_): _description_
+            data (_type_): 点群の配列
+            index (_type_): ノードの座標
         """
+
         self.data = np.reshape(np.nan_to_num(data), (100,3))     # 点群の配列　np.array型(10×10)
         self.members = set(points)
         for point in self.members:
@@ -185,7 +200,14 @@ class Node:
         self.down = None
         self.edges = set()
 
-    def set_params(self, phase):   # 閾値定義
+    def set_params(self, phase):
+
+        """閾値を定義する
+
+        Args:
+            phase (_type_): _description_
+        """
+
         if phase == 0:
             self.t_mse = (1.6e-6*self.center[2]**2+5)**2
         else:
@@ -193,6 +215,14 @@ class Node:
         self.t_mse = 15
 
     def push(self):
+
+        """点をノードに追加する
+
+        ノードを構成する要素としてポイントを追加し
+        データ配列にポイント要素を加え,ポイントの親ノード情報を更新する
+    
+        """
+
         for point in self.refine_pc:
             self.members.add(point)
             point.node = self
@@ -204,6 +234,10 @@ class Node:
         self.compute()
 
     def compute(self):
+
+        """ノードクラスの各値をそれぞれ定義する
+        """
+
         self.center = [np.average(self.data[..., 0]), np.average(self.data[..., 1]), np.average(self.data[..., 2])]    # 平均(重心)
         self.cov = np.cov(self.data[..., :2].reshape(self.data.size//3, 2).T, self.data[..., 2].reshape(self.data.size//3,), rowvar=True)     # 分散共分散行列
 
@@ -215,8 +249,17 @@ class Node:
             self.normal = eig[1][ind]  #固有ベクトル(法線)
         else:
             self.normal = -eig[1][ind]
+        self.set_color_vec()
 
     def calculate_pf_mse(self, new_data):
+
+        """マージしたノードの分散共分散行列から平均二乗誤差を計算する
+
+        Returns:
+            _type_: _description_
+
+        """
+        
         data = np.concatenate([self.data, new_data])
         cov = np.cov(data[..., :2].reshape(data.size//3, 2).T, data[..., 2].reshape(data.size//3,), rowvar=True)     # 分散共分散行列
 
@@ -225,10 +268,37 @@ class Node:
         mse = eig[0][ind]  # 最小の固有値
 
         return mse
+
+    def set_color_vec(self):
+
+        """ベクトルから固有値を求める
+        """
+
+        clx = ((self.normal[0] + 1.0) * 0.5 * 255.0)
+        cly = ((self.normal[1] + 1.0) * 0.5 * 255.0)
+        clz = ((self.normal[2] + 1.0) * 0.5 * 255.0)
+        self.normal_clr = cv2.Vec3b(clx, cly, clz)
+        self.clr = cv2.Vec3b(random.rand() % 255, random.rand() % 255, random.rand() % 255)
+
     
-# nodeのマージのためのクラス
 class Plane(Node):
+    """ノードをマージするためのクラス
+
+    Args:
+        Node (_type_): マージさせたいノード
+
+    """
+
     def __init__(self, node_a, node_b):
+
+        """オブジェクト作成時に実行される
+
+        Args:
+            node_a (_type_): マージ元のノード
+            node_b (_type_): マージさせたいノード
+
+        """
+
         self.data = np.concatenate([node_a.data, node_b.data])
         self.members = {node_a, node_b}
         node_a.plane = node_b.plane = self
@@ -241,12 +311,29 @@ class Plane(Node):
         self.calc_plane_d(self.data[0])
 
     def add_edges(self, node_a, node_b):
+
+        """マージ後に連結情報を更新する
+
+        マージ元のノードにマージしたノードの連結情報を追加し
+        重複部分を消去する
+
+        """
+
         self.edges = node_a.edges | node_b.edges
         for rm in self.members:
             if rm in self.edges:
                 self.edges.remove(rm)
 
     def push(self, subject, has_plane=False):
+
+        """ノードをマージする
+
+        Args:
+            subject (_type_): _description_
+            has_plane (bool, optional): _description_. Defaults to False.
+
+        """
+
         self.data = np.concatenate([self.data, subject.data])
         self.add_edges(self, subject)
         if has_plane:
@@ -262,12 +349,28 @@ class Plane(Node):
         # self.compute()
 
     def pop(self, node):
+
+        """ノードのマージを取り消す
+
+        Args:
+            node (_type_): マージを取り消したいノード
+
+        """
+
         self.data= np.delete(self.data, np.argwhere(self.data == node.data))
         self.members.remove(node)
         node.g_num = 0
         # self.compute()
 
     def clear(self):
+
+        """マージ関係を全て消去する
+
+        面を構成するマージしたノードの情報を消去する
+        それぞれのg_numを0にする
+
+        """
+
         self.g_num = 0
         # self.members = list(map(lambda node: node.g_num * 0, self.members))   #出来なかったやつ
         for node in self.members:
@@ -275,13 +378,22 @@ class Plane(Node):
             for point in node.members:
                 point.g_num = 0
 
-    #  面の平面方程式を求める関数(dの情報がほしい)
     def calc_plane_d(self, point_cord):
+
+        """面の平面方程式を求める
+
+        Args:
+            point_cord (_type_): 面の中の任意の1点の座標(x, y, z)
+
+
+        """
+
         # 法線ベクトルと通る点から求める
         self.d = -1*((self.normal[0]*point_cord[0]) + (self.normal[1]*point_cord[1]) + (self.normal[2]*point_cord[2]))
 
 # データ構造構築
 def init_graph(points, verts, h=10, w=10):
+
     """深さデータからノードとそれらのつながりを作成する
 
     深さデータを引数h,wで指定した値ごとに区切ったノード(オブジェクト)を作る
@@ -290,25 +402,16 @@ def init_graph(points, verts, h=10, w=10):
     作成したノードの集合とエッジを持ったノードの集合を作成し戻り値とする
 
     Args:
-        points: 
-        verts: 
-        h: ノードをつくる縦の幅の値
-        w: ノードをつくる横の幅の値
+        points (_type_): _description_
+        verts (_type_): _description_
+        h (int, optional): _description_. Defaults to 10.
+        w (int, optional): _description_. Defaults to 10.
 
     Returns:
-        nodes: ノードオブジェクトの集合
-        edges: エッジ情報を更新したノードオブジェクトの集合
-
-    Raises:
-
-    Yields:
-        なし
-
-    Examples:
-
-        >>> nodes, edges = init_graph(points, verts, 10, 10)
+        _type_: _description_
 
     """
+
     log(sys._getframe().f_code.co_name, START)
     nodes = []
     rejected_nodes = set()
@@ -362,6 +465,7 @@ def init_graph(points, verts, h=10, w=10):
 
 # ノードの除去
 def reject_node(node, threshold=25):
+
     """_summary_
 
     Args:
@@ -370,7 +474,9 @@ def reject_node(node, threshold=25):
 
     Returns:
         _type_: _description_
+
     """
+
     data = np.reshape(node.data, (10, 10, 3))
 
     # データが欠落していたら
@@ -399,8 +505,19 @@ def reject_node(node, threshold=25):
 
     return False
 
-# 連結関係の除去
 def rejectedge(node1, node2):
+
+    """連結関係を消去する
+
+    Args:
+        node1 (_type_): _description_
+        node2 (_type_): _description_
+
+    Returns:
+        bool: _description_
+
+    """
+
     # 欠落していなければ
     if node2.node_type != TYPE_NORMAL:
         return True 
@@ -412,8 +529,19 @@ def rejectedge(node1, node2):
 
     return False
 
-# 粗い平面検出
 def ahcluster(nodes, edges):
+
+    """粗い平面検出を行う
+
+    Args:
+        nodes (_type_): ノードが含まれる集合
+        edges (_type_): 連結関係をもったノードが含まれる集合
+
+    Returns:
+        _type_: _description_
+
+    """
+
     log(sys._getframe().f_code.co_name, START)
 
     # MSEの昇順のヒープを作る
@@ -493,10 +621,24 @@ def ahcluster(nodes, edges):
     return planes
 
 def set_time():
+
+    """時間を設定する
+    """
+
     global start_time
     start_time = time.time()
 
 def log(func_name, flag=None, message=None):
+
+    """経過時間を別ファイルに書き込む
+
+    Args:
+        func_name (_type_): 実行する関数名
+        flag (_type_, optional): _description_. Defaults to None.
+        message (_type_, optional): _description_. Defaults to None.
+
+    """
+
     # calculate elapsed time
     elapsed_time = int(time.time() - start_time)
 
@@ -512,8 +654,18 @@ def log(func_name, flag=None, message=None):
     if message:
         glob.log_file.write(f"{message}\n")
 
-# ヒープの作成
 def build_mse_heap(edges):
+
+    """mseの値で並び替えたキュー(ヒープ)を作成する
+
+    Args:
+        edges (_type_): 連結情報をもつノードの集合
+
+    Returns:
+        _type_: 作成したキュー
+
+    """
+
     log(sys._getframe().f_code.co_name, START)
 
     # 1つずつmseを計算し直して並べ替える)
@@ -522,8 +674,19 @@ def build_mse_heap(edges):
     log(sys._getframe().f_code.co_name, END)
     return queue
 
-# 粗い平面検出の精緻化
+
 def refine(planes):
+
+    """粗い平面検出の精緻化
+
+    Args:
+        planes (_type_): 粗く検出した面の集合
+
+    Returns:
+        _type_: _description_
+
+    """
+
     # 境界面のpointのみを集める
     glob.boud_queue = build_boud_heap(planes)
     # glob.pbar = tqdm(total=len(glob.boud_queue))
@@ -541,6 +704,17 @@ def refine(planes):
     return ahcluster(glob.nodes, glob.refine_edges | glob.edges)
 
 def build_boud_heap(planes):
+
+    """
+
+    Args:
+        planes (_type_): _description_
+
+    Returns:
+        _type_: _description_
+    
+    """
+    
     queue = deque()
     # queue.extend(sum(points, []))
     # 上下左右のどれかが欠落nodeまたは端ならば面から除去
@@ -571,6 +745,7 @@ def build_boud_heap(planes):
 # pointの上下左右を確認しnodeのつながりを定義し直す関数
 # pointクラスがあること前提(上下左右の情報や所属しているnode自体やその面番号の情報がほしい)
 def check_ref_points(point):
+
     """_summary_
 
     Args:
@@ -578,6 +753,7 @@ def check_ref_points(point):
 
     Note:
         point_position = np.argwhere((verts==point).all()) できてない
+
     """
 
     # 左右上下の順で取り出す
@@ -594,6 +770,15 @@ def check_ref_points(point):
     log()
 
 def connect(node_a, node_b):
+    
+    """
+
+    Args:
+        node_a (_type_): _description_
+        node_b (_type_): _description_
+    
+    """
+    
     node_a.edges.add(node_b)
     node_b.edges.add(node_a)
     glob.refine_edges.add(node_a)
@@ -601,6 +786,18 @@ def connect(node_a, node_b):
 
 # 2つのpointが同じ面か，違う面か判定し，違う面なら
 def make_refine(point, adjacent):
+    
+    """2つの点が同じ面か違う面か判定し,結果によってそれぞれの処理を行う
+
+    Args:
+        point (_type_): _description_
+        adjacent (_type_): _description_
+
+    Returns:
+        _type_: _description_
+    
+    """
+    
     # 取り出したポイントと同一node(k)に属している
     if point.node == adjacent.node != None:
         return True
@@ -634,6 +831,7 @@ def make_refine(point, adjacent):
     log()       
 
 def calc_distance(suf, point):
+
     """面と点の距離を計算する関数
 
     Args:
@@ -642,7 +840,9 @@ def calc_distance(suf, point):
 
     Returns:
         _type_: _description_
+    
     """
+    
     dist = (abs(suf.normal[0]*point.data[0] + suf.normal[1]*point.data[1] + suf.normal[2]*point.data[2] + suf.d)) / (math.sqrt(suf.normal[0]**2 + suf.normal[1]**2 + suf.normal[2]**2))
     
     print("calc_distance: end")

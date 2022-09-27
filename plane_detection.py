@@ -29,6 +29,7 @@ TYPE_MISSING_DATA = 1
 TYPE_DEPTH_DISCONTINUE = 2
 TYPE_BIG_MSE = 3
 
+# マージのタイプ
 PUSH = 0
 POP = 1
 
@@ -274,9 +275,9 @@ class Node:
         """ベクトルから固有値を求める
         """
 
-        clx = ((self.normal[0] + 1.0) * 0.5 * 255.0)
-        cly = ((self.normal[1] + 1.0) * 0.5 * 255.0)
-        clz = ((self.normal[2] + 1.0) * 0.5 * 255.0)
+        clx = ((self.normal[0] + 1.0) * 0.5 * 255.0) # unsigned char (0~255)
+        cly = ((self.normal[1] + 1.0) * 0.5 * 255.0) # unsigned char (0~255)
+        clz = ((self.normal[2] + 1.0) * 0.5 * 255.0) # unsigned char (0~255)
         self.normal_clr = cv2.Vec3b(clx, cly, clz)
         self.clr = cv2.Vec3b(random.rand() % 255, random.rand() % 255, random.rand() % 255)
 
@@ -742,11 +743,9 @@ def build_boud_heap(planes):
 
     return queue
 
-# pointの上下左右を確認しnodeのつながりを定義し直す関数
-# pointクラスがあること前提(上下左右の情報や所属しているnode自体やその面番号の情報がほしい)
 def check_ref_points(point):
 
-    """_summary_
+    """ポイントの上下左右を確認しノードの連結情報を定義し直す関数
 
     Args:
         point (_type_): _description_
@@ -784,7 +783,6 @@ def connect(node_a, node_b):
     glob.refine_edges.add(node_a)
     glob.refine_edges.add(node_b)
 
-# 2つのpointが同じ面か，違う面か判定し，違う面なら
 def make_refine(point, adjacent):
     
     """2つの点が同じ面か違う面か判定し,結果によってそれぞれの処理を行う
@@ -792,6 +790,7 @@ def make_refine(point, adjacent):
     Args:
         point (_type_): _description_
         adjacent (_type_): _description_
+
 
     Returns:
         _type_: _description_
@@ -851,7 +850,7 @@ def calc_distance(suf, point):
     return dist
 
 if __name__ == '__main__':   
-    if REAL_TIME:
+    if REAL_TIME: # カメラ映像
         # Configure depth and color streams
         pipeline = rs.pipeline()
         config = rs.config()
@@ -908,7 +907,7 @@ if __name__ == '__main__':
                 cv2.destroyAllWindows()
                 break
 
-    else:
+    else: # Matファイル読み込み
         data = scipy.io.loadmat('frame.mat')["frame"]
         verts = data[0, 0][0]
         color_image = data[0, 0][1]

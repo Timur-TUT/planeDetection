@@ -167,7 +167,6 @@ class Point:
         self.refined = None
         self.g_num = 0
 
-# Nodeのクラス
 class Node:
     """ノードのクラス
 
@@ -278,15 +277,14 @@ class Node:
         clx = ((self.normal[0] + 1.0) * 0.5 * 255.0) # unsigned char (0~255)
         cly = ((self.normal[1] + 1.0) * 0.5 * 255.0) # unsigned char (0~255)
         clz = ((self.normal[2] + 1.0) * 0.5 * 255.0) # unsigned char (0~255)
-        self.normal_clr = cv2.Vec3b(clx, cly, clz)
-        self.clr = cv2.Vec3b(random.rand() % 255, random.rand() % 255, random.rand() % 255)
+        self.normal_clr = [clx, cly, clz] # 例では発見できていない
+        self.clr = [random.randint(0, 255), random.randint(0, 255), random.randint(0, 255)] # 表示で使ってる
 
-    
 class Plane(Node):
     """ノードをマージするためのクラス
 
     Args:
-        Node (_type_): マージさせたいノード
+        Node (_tyape_): マージさせたいノード
 
     """
 
@@ -391,6 +389,16 @@ class Plane(Node):
 
         # 法線ベクトルと通る点から求める
         self.d = -1*((self.normal[0]*point_cord[0]) + (self.normal[1]*point_cord[1]) + (self.normal[2]*point_cord[2]))
+
+# とりあえず定義
+class PlaneSeg():
+    """
+    """
+    
+    def __init__(self, data, node=None):
+        self.data = data
+        self.node = node
+        self.best = None
 
 # データ構造構築
 def init_graph(points, verts, h=10, w=10):
@@ -573,6 +581,7 @@ def ahcluster(nodes, edges):
 
         # vと連結関係にあるuを取り出して
         # 連結関係のノードをマージする
+        log(sys._getframe().f_code.co_name, None, "trying merge")
         best_mse = [math.inf, None]
         for edg in suf.edges:
             current_mse = suf.calculate_pf_mse(edg.data)
@@ -583,13 +592,16 @@ def ahcluster(nodes, edges):
         suf.set_params(1)
         # print(best_mse[0])
         if best_mse[0] >= suf.t_mse:
+            log(sys._getframe().f_code.co_name, None, "merge failed")
             flatten_nodes.remove(suf)
             pbar.update(1)
             if len(suf.members) >= 10:
                 planes.append(Plane(suf, best_mse[1]))
 
         # マージ成功
+        # ここでループしているかも?
         else:
+            log(sys._getframe().f_code.co_name, None, "merge successed")
             for rm in [suf, best_mse[1]]:
                 if rm in flatten_nodes:
                     flatten_nodes.remove(rm)
@@ -605,6 +617,7 @@ def ahcluster(nodes, edges):
 
         log(sys._getframe().f_code.co_name, None, "loop_end")
 
+    """
     # 演出用
     # image = glob.visualize()
     # cv2.namedWindow('RealSense', cv2.WINDOW_AUTOSIZE)
@@ -616,6 +629,7 @@ def ahcluster(nodes, edges):
     #     print(f"group: {planes[i].g_num}")
     #     print(f"edges: {len(planes[i].edges)}")
     #     print("------------------------")
+    """
     pbar.close()
 
     log(sys._getframe().f_code.co_name, END)
